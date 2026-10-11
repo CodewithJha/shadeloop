@@ -4,7 +4,7 @@ import { CONDITIONS, MissionType, ObservationValue, type Condition } from '@shad
 import { env } from './config.ts';
 import { log } from './log.ts';
 import { lastCall, recordCall, type IntegrationStatus } from './integrations.ts';
-import { Candidate, findUnsafeText } from './domain.ts';
+import { Candidate } from './domain.ts';
 
 interface Provider {
   name: 'ollama' | 'openai';
@@ -195,20 +195,4 @@ export async function aiParseNote(text: string) {
     `Note: """${text}"""`,
     NoteObservations,
   );
-}
-
-const Summary = z.object({ summary: z.string().trim().min(20).max(600) });
-
-export async function aiSummarize(facts: unknown) {
-  const r = await aiJson(
-    'summarize_report',
-    'Write a 2-3 sentence plain summary of a completed outdoor mission from the supplied facts only. ' +
-      'Mention where observations differed from expectations. Do not add facts, praise, or health advice.',
-    JSON.stringify(facts),
-    Summary,
-  );
-  if (r.data && findUnsafeText(r.data.summary)) {
-    return { data: null, meta: { ...r.meta, fallbackUsed: true, fallbackReason: 'summary failed safety check' } };
-  }
-  return r;
 }

@@ -33,14 +33,23 @@ import {
   type ValidatedCandidate,
 } from './domain.ts';
 import { AppError, notFound } from './errors.ts';
-import { aiParseRequest, aiProposeMissions, aiSummarize, type AiMeta } from './ai.ts';
+import { aiParseRequest, aiProposeMissions, type AiMeta } from './ai.ts';
 import { buildTemplate, keywordConstraints, relatedTypes, templateSummary } from './fallback.ts';
 import { discover, getWeather, loadLocations, type DiscoveryResult } from './providers.ts';
 import { getPrefs } from './account.ts';
 import { log } from './log.ts';
 
-export type MissionDoc = Omit<Mission, 'id'> & { _id: string; ownerId: string; planId: string; updatedAt: string; expireAt?: Date; appliedOpIds: string[] };
-type ReportDoc = Omit<Report, 'id'> & { _id: string; ownerId: string };
+export type MissionDoc = Omit<Mission, 'id'> & {
+  _id: string;
+  ownerId: string;
+  planId: string;
+  updatedAt: string;
+  expireAt?: Date;
+  appliedOpIds: string[];
+  /** Saved with the completion so the report can be (re)built from the mission alone. */
+  feedback?: Report['feedback'];
+};
+type ReportDoc = Omit<Report, 'id'> & { _id: string; ownerId: string; observationIds?: string[] };
 export type ObservationDoc = {
   _id: string;
   opId: string;
@@ -64,12 +73,12 @@ const reports = () => col<ReportDoc>('reports');
 const evidenceCol = () => col<EvidenceDoc>('evidence');
 
 export function missionView(d: MissionDoc): Mission {
-  const { _id, ownerId: _o, planId: _p, updatedAt: _u, expireAt: _e, appliedOpIds: _a, ...rest } = d;
+  const { _id, ownerId: _o, planId: _p, updatedAt: _u, expireAt: _e, appliedOpIds: _a, feedback: _f, ...rest } = d;
   return { id: _id, ...rest };
 }
 
 export function reportView(d: ReportDoc): Report {
-  const { _id, ownerId: _o, ...rest } = d;
+  const { _id, ownerId: _o, observationIds: _i, ...rest } = d;
   return { id: _id, ...rest };
 }
 
@@ -348,6 +357,9 @@ export async function history(ownerId: string, page: number, limit: number) {
     .find({ ownerId, missionId: { $in: list.items.map((m) => m.id) } }, { projection: { missionId: 1, summary: 1, actual: 1, comparisons: 1 } })
     .toArray();
   const byMission = new Map(reps.map((r) => [r.missionId, r]));
+  for (const m of list.items) {
+    if (m.status === 'completed' && !byMission.has(m.id)) byMission.set(m.id, await ensureReport(await getMission(ownerId, m.id)));
+  }
   return {
     ...list,
     items: list.items.map((m) => {
@@ -362,8 +374,10 @@ export async function history(ownerId: string, page: number, limit: number) {
 
 export async function getReport(ownerId: string, id: string) {
   const r = await reports().findOne({ _id: id, ownerId });
-  if (!r) throw notFound('Report');
-  return reportView(r);
+  if (r) return reportView(r);
+  const m = await missions().findOne({ reportId: id, ownerId, status: 'completed' });
+  if (!m) throw notFound('Report');
+  return reportView(await ensureReport(m));
 }
 
 export async function listObservations(ownerId: string, missionId: string) {
@@ -391,7 +405,12 @@ export async function transition(
   opts: { clientTs?: string; opId?: string; currentStep?: number; complete?: Partial<CompleteInput> } = {},
 ) {
   const m = await getMission(ownerId, id);
-  if (opts.opId && m.appliedOpIds.includes(opts.opId)) return { mission: missionView(m), reportId: m.reportId, alreadyApplied: true };
+  // Repeating a complete (same opId or not) returns the one report, building it if a crash left it missing.
+  const settled = async (d: MissionDoc) => {
+    if (d.status === 'completed') await ensureReport(d);
+    return { mission: missionView(d), reportId: d.reportId, alreadyApplied: true };
+  };
+  if ((opts.opId && m.appliedOpIds.includes(opts.opId)) || (action === 'complete' && m.status === 'completed')) return settled(m);
   const to = nextStatus(m.status, action);
   if (!to) throw new AppError(409, 'INVALID_TRANSITION', `Cannot ${action} a mission that is ${m.status}`, { currentStatus: m.status, action });
 
@@ -418,20 +437,12 @@ export async function transition(
   const step = opts.currentStep ?? opts.complete?.currentStep;
   if (step !== undefined) s.currentStep = Math.min(step, m.steps.length - 1);
 
-  let report: ReportDoc | null = null;
-  if (action === 'complete') {
-    report = await buildReport(m, s, opts.complete ?? {});
-    try {
-      await reports().insertOne(report);
-    } catch (e) {
-      if (isDuplicateKey(e)) throw new AppError(409, 'CONFLICT', 'Mission already has a report');
-      throw e;
-    }
-  }
+  const completion =
+    action === 'complete' ? { reportId: randomUUID(), feedback: { rating: opts.complete?.rating ?? null, text: opts.complete?.feedback ?? null } } : {};
   const updated = await missions().findOneAndUpdate(
     { _id: id, ownerId, version: m.version },
     {
-      $set: { status: to, session: s, updatedAt: new Date().toISOString(), ...(report ? { reportId: report._id } : {}) },
+      $set: { status: to, session: s, updatedAt: new Date().toISOString(), ...completion },
       $inc: { version: 1 },
       ...(opts.opId ? { $push: { appliedOpIds: { $each: [opts.opId], $slice: -100 } } } : {}),
       ...(action === 'start' ? { $unset: { expireAt: '' } } : {}),
@@ -439,13 +450,45 @@ export async function transition(
     { returnDocument: 'after' },
   );
   if (!updated) {
-    if (report) await reports().deleteOne({ _id: report._id });
+    const now = await getMission(ownerId, id);
+    if ((opts.opId && now.appliedOpIds.includes(opts.opId)) || (action === 'complete' && now.status === 'completed')) return settled(now);
     throw new AppError(409, 'CONFLICT', 'Mission changed at the same time. Reload and retry.');
   }
+  if (action === 'complete') await ensureReport(updated);
   return { mission: missionView(updated), reportId: updated.reportId, alreadyApplied: false };
 }
 
-async function buildReport(m: MissionDoc, s: MissionDoc['session'], input: Partial<CompleteInput>): Promise<ReportDoc> {
+/**
+ * The report of a completed mission, built once from persisted observations. Safe to call concurrently and after a crash:
+ * its id was fixed when the mission was completed, so the first insert wins and everyone else reads it.
+ */
+async function ensureReport(m: MissionDoc): Promise<ReportDoc> {
+  const id = m.reportId!;
+  const existing = await reports().findOne({ _id: id });
+  if (existing) return existing;
+  const report = await buildReport(m, id);
+  try {
+    await reports().insertOne(report);
+    return report;
+  } catch (e) {
+    if (!isDuplicateKey(e)) throw e;
+  }
+  const won = await reports().findOne({ _id: id });
+  if (won) return won;
+  // A report under another id is an orphan from before completion committed first; it may miss observations.
+  await reports().deleteMany({ missionId: m._id, _id: { $ne: id } });
+  try {
+    await reports().insertOne(report);
+    return report;
+  } catch (e) {
+    if (!isDuplicateKey(e)) throw e;
+    return (await reports().findOne({ _id: id }))!;
+  }
+}
+
+async function buildReport(m: MissionDoc, id: string): Promise<ReportDoc> {
+  const s = m.session;
+  const input = m.feedback ?? { rating: null, text: null };
   const obs = await observations().find({ ownerId: m.ownerId, missionId: m._id }).sort({ clientTs: 1 }).toArray();
   const latest = new Map<Attribute, string>();
   for (const o of obs) latest.set(o.attribute, o.value);
@@ -474,13 +517,12 @@ async function buildReport(m: MissionDoc, s: MissionDoc['session'], input: Parti
     stepCount: m.steps.length,
     comparisons: comparisons.map(({ attribute, expected, observed, result }) => ({ attribute, expected, observed, result })),
   };
-  const ai = await aiSummarize(facts);
   const locationId = m.selectedLocation?.id;
   const evidenceRefs = locationId
     ? (await evidenceCol().find({ locationId, attribute: { $in: [...latest.keys()] } }).toArray()).map(evidenceView)
     : [];
   return {
-    _id: randomUUID(),
+    _id: id,
     ownerId: m.ownerId,
     missionId: m._id,
     createdAt: new Date().toISOString(),
@@ -500,16 +542,17 @@ async function buildReport(m: MissionDoc, s: MissionDoc['session'], input: Parti
       observations: obs.map((o) => ({ attribute: o.attribute, value: o.value, observedAt: o.clientTs })),
     },
     comparisons,
-    feedback: { rating: input.rating ?? null, text: input.feedback ?? null },
+    feedback: input,
     summary: {
-      text: ai.data?.summary ?? templateSummary({ ...facts, observationCount: obs.length }),
-      generator: ai.data ? 'ai' : 'template',
-      provider: ai.meta.provider,
-      model: ai.meta.model,
-      fallbackUsed: !ai.data,
-      fallbackReason: ai.meta.fallbackReason,
+      text: templateSummary({ ...facts, observationCount: obs.length }),
+      generator: 'template',
+      provider: null,
+      model: null,
+      fallbackUsed: true,
+      fallbackReason: 'AI summaries are not generated at completion',
     },
     evidenceRefs,
+    observationIds: obs.map((o) => o._id),
   };
 }
 
@@ -517,11 +560,11 @@ async function buildReport(m: MissionDoc, s: MissionDoc['session'], input: Parti
 
 export async function addObservation(ownerId: string, missionId: string, input: { attribute: Attribute; value: string; opId: string; clientTs: string }) {
   const m = await getMission(ownerId, missionId);
-  if (m.status !== 'active' && m.status !== 'paused') {
-    throw new AppError(409, 'MISSION_NOT_ACTIVE', `Observations need an active or paused mission (currently ${m.status})`, { currentStatus: m.status });
-  }
+  const notActive = (status: Mission['status']) =>
+    new AppError(409, 'MISSION_NOT_ACTIVE', `Observations need an active or paused mission (currently ${status})`, { currentStatus: status });
+  if (m.status !== 'active' && m.status !== 'paused') throw notActive(m.status);
   const locationId = m.selectedLocation?.id ?? null;
-  const doc: ObservationDoc = {
+  let doc: ObservationDoc = {
     _id: randomUUID(),
     opId: input.opId,
     ownerId,
@@ -536,14 +579,27 @@ export async function addObservation(ownerId: string, missionId: string, input: 
     verificationStatus: 'unverified',
     privacy: locationId ? 'location_linked' : 'mission_only',
   };
+  let duplicate = false;
   try {
     await observations().insertOne(doc);
   } catch (e) {
     if (!isDuplicateKey(e)) throw e;
     const prior = await observations().findOne({ opId: input.opId });
     if (!prior || prior.ownerId !== ownerId) throw new AppError(409, 'OPID_CONFLICT', 'opId already used');
-    return { observation: prior, duplicate: true, evidence: null };
+    doc = prior;
+    duplicate = true;
   }
+  // The mission may have been completed or cancelled since the check above. The observation is kept only if the
+  // mission is still open (so any later report reads it) or the mission's report already contains it.
+  const now = await getMission(ownerId, doc.missionId);
+  const kept =
+    now.status === 'active' || now.status === 'paused' || (now.status === 'completed' && (await ensureReport(now)).observationIds?.includes(doc._id));
+  if (!kept) {
+    await observations().deleteOne({ _id: doc._id });
+    if (doc.locationId) await recomputeEvidence(doc.locationId, doc.attribute);
+    throw notActive(now.status);
+  }
+  if (duplicate) return { observation: doc, duplicate: true, evidence: null };
   const evidence = locationId ? await recomputeEvidence(locationId, input.attribute) : null;
   return { observation: doc, duplicate: false, evidence };
 }

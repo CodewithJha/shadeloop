@@ -62,6 +62,7 @@ export const RULES = {
   rainMm: 0.5,
   plannedMissionTtlDays: 7,
   syncRecordTtlDays: 30,
+  syncLeaseMs: 30_000, // how long a request may hold an op before another request can take it over
   minAnalyticsSamples: 5,
   evidence: {
     moderateMinIndependent: 3,

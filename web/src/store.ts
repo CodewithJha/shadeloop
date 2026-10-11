@@ -175,8 +175,8 @@ async function doFlush(send: (ops: SyncOp[]) => Promise<SyncResult[]>, now: numb
   const byId = new Map(results.map((r) => [r.opId, r]));
   for (const q of due) {
     const r = byId.get(q.opId);
-    if (!r) {
-      await d.put('ops', { ...q, state: 'failed', attempts: q.attempts + 1, nextAttemptAt: now + backoffMs(q.attempts + 1), lastError: 'No result returned' });
+    if (!r || r.status === 'retry') {
+      await d.put('ops', { ...q, state: 'failed', attempts: q.attempts + 1, nextAttemptAt: now + backoffMs(q.attempts + 1), lastError: r?.error?.message ?? 'No result returned' });
     } else if (r.status === 'applied' || r.status === 'duplicate') {
       await d.put('ops', { ...q, state: 'synced', syncedAt: now, result: r, lastError: undefined });
       const reportId = (r.result as { reportId?: string } | undefined)?.reportId;

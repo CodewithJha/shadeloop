@@ -614,12 +614,18 @@ type SyncRecord = {
   opType: SyncOp['type'];
   clientTs: string;
   serverTs: Date;
-  status: SyncResult['status'];
+  /** `pending` while one request holds the lease and applies the op; anything else is the final answer. */
+  status: Exclude<SyncResult['status'], 'duplicate' | 'retry'> | 'pending';
+  lease?: string;
+  leaseUntil?: Date;
   result?: Record<string, unknown>;
   error?: SyncResult['error'];
 };
 
-async function applyOp(ownerId: string, op: SyncOp): Promise<Omit<SyncResult, 'opId' | 'result'> & { result?: Record<string, unknown> }> {
+async function applyOp(
+  ownerId: string,
+  op: SyncOp,
+): Promise<{ status: Exclude<SyncResult['status'], 'duplicate'>; result?: Record<string, unknown>; error?: SyncResult['error'] }> {
   try {
     if (op.type === 'observation') {
       const r = await addObservation(ownerId, op.missionId, { ...op.payload, opId: op.opId, clientTs: op.clientTs });
@@ -634,26 +640,21 @@ async function applyOp(ownerId: string, op: SyncOp): Promise<Omit<SyncResult, 'o
     return { status: 'applied', result: { missionStatus: r.mission.status, version: r.mission.version, reportId: r.reportId } };
   } catch (e) {
     if (!(e instanceof AppError) || e.status >= 500) throw e;
-    return { status: e.status === 409 ? 'conflict' : 'rejected', error: { code: e.code, message: e.message, details: e.details } };
+    const error = { code: e.code, message: e.message, details: e.details };
+    // Losing an optimistic-concurrency race says nothing about the op itself, so it must not become its stored answer.
+    if (e.code === 'CONFLICT') return { status: 'retry', error };
+    return { status: e.status === 409 ? 'conflict' : 'rejected', error };
   }
 }
 
-/** Apply ops in order. Repeated opIds return the stored result. Server errors abort the batch so the client retries; already-applied ops then come back as duplicates. */
-export async function sync(ownerId: string, ops: SyncOp[]): Promise<SyncResult[]> {
-  const results: SyncResult[] = [];
-  const recs = col<SyncRecord>('sync_records');
-  const asDuplicate = (prior: SyncRecord): SyncResult =>
-    prior.ownerId === ownerId
-      ? { opId: prior.opId, status: 'duplicate', result: { originalStatus: prior.status, ...prior.result }, ...(prior.error ? { error: prior.error } : {}) }
-      : { opId: prior.opId, status: 'rejected', error: { code: 'OPID_CONFLICT', message: 'opId already used' } };
-  for (const op of ops) {
-    const prior = await recs.findOne({ opId: op.opId });
-    if (prior) {
-      results.push(asDuplicate(prior));
-      continue;
-    }
-    const res = await applyOp(ownerId, op);
-    const record: SyncRecord = {
+const syncRecords = () => col<SyncRecord>('sync_records');
+
+/** Claim an opId before applying it: returns our lease, or the answer to send instead (stored result, foreign opId, or still in progress). */
+async function reserve(ownerId: string, op: SyncOp): Promise<string | SyncResult> {
+  const lease = randomUUID();
+  const leaseUntil = () => new Date(Date.now() + RULES.syncLeaseMs);
+  try {
+    await syncRecords().insertOne({
       opId: op.opId,
       ownerId,
       entityType: op.type === 'observation' ? 'observation' : 'mission',
@@ -661,18 +662,58 @@ export async function sync(ownerId: string, ops: SyncOp[]): Promise<SyncResult[]
       opType: op.type,
       clientTs: op.clientTs,
       serverTs: new Date(),
-      status: res.status,
-      ...(res.result ? { result: res.result } : {}),
-      ...(res.error ? { error: res.error } : {}),
-    };
-    try {
-      await recs.insertOne(record);
-    } catch (e) {
-      if (!isDuplicateKey(e)) throw e;
-      results.push(asDuplicate((await recs.findOne({ opId: op.opId }))!));
+      status: 'pending',
+      lease,
+      leaseUntil: leaseUntil(),
+    });
+    return lease;
+  } catch (e) {
+    if (!isDuplicateKey(e)) throw e;
+  }
+  const inProgress: SyncResult = { opId: op.opId, status: 'retry', error: { code: 'IN_PROGRESS', message: 'This op is being applied by another request. Resend it later.' } };
+  const prior = await syncRecords().findOne({ opId: op.opId });
+  if (!prior) return inProgress;
+  if (prior.ownerId !== ownerId) return { opId: op.opId, status: 'rejected', error: { code: 'OPID_CONFLICT', message: 'opId already used' } };
+  if (prior.status !== 'pending') {
+    return { opId: op.opId, status: 'duplicate', result: { originalStatus: prior.status, ...prior.result }, ...(prior.error ? { error: prior.error } : {}) };
+  }
+  // The holder crashed or stalled past its lease: take the op over. Re-applying is safe because the domain dedupes by opId.
+  const taken = await syncRecords().findOneAndUpdate(
+    { opId: op.opId, ownerId, status: 'pending', leaseUntil: { $lte: new Date() } },
+    { $set: { lease, leaseUntil: leaseUntil() } },
+  );
+  return taken ? lease : inProgress;
+}
+
+/**
+ * Apply ops in order, each at most once per opId. Repeated opIds return the stored result. Server errors release the
+ * op and abort the batch so the client retries; a `retry` result stops the batch too, so later ops never run out of order.
+ */
+export async function sync(ownerId: string, ops: SyncOp[]): Promise<SyncResult[]> {
+  const results: SyncResult[] = [];
+  for (const op of ops) {
+    const lease = await reserve(ownerId, op);
+    if (typeof lease !== 'string') {
+      results.push(lease);
+      if (lease.status === 'retry') break;
       continue;
     }
+    let res: Awaited<ReturnType<typeof applyOp>>;
+    try {
+      res = await applyOp(ownerId, op);
+    } catch (e) {
+      await syncRecords().deleteOne({ opId: op.opId, lease });
+      throw e;
+    }
     results.push({ opId: op.opId, ...res });
+    if (res.status === 'retry') {
+      await syncRecords().deleteOne({ opId: op.opId, lease });
+      break;
+    }
+    await syncRecords().updateOne(
+      { opId: op.opId, lease },
+      { $set: { status: res.status, serverTs: new Date(), ...(res.result ? { result: res.result } : {}), ...(res.error ? { error: res.error } : {}) }, $unset: { lease: '', leaseUntil: '' } },
+    );
   }
   return results;
 }

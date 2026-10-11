@@ -186,6 +186,109 @@ describe('report persistence and recovery', () => {
   });
 });
 
+type Result = { opId: string; status: string; result?: Record<string, unknown>; error?: { code: string } };
+const syncOps = async (h: Record<string, string>, ops: object[]) => (await request(app).post(`${api}/sync`).set(h).send({ ops }).expect(200)).body.results as Result[];
+const record = (opId: string) => col('sync_records').findOne({ opId });
+const ownerOf = async (missionId: string) => (await col('missions').findOne({ _id: missionId as never }))!.ownerId as string;
+
+/** Hold mission reads until `n` have arrived (or 100 ms pass), so concurrent requests all see the same version. */
+function barrierOnMissionReads(n: number) {
+  const orig = Collection.prototype.findOne;
+  let arrived = 0;
+  let open!: () => void;
+  const gate = new Promise<void>((r) => (open = r));
+  setTimeout(() => open(), 100);
+  vi.spyOn(Collection.prototype, 'findOne').mockImplementation(async function (this: Collection, ...args: unknown[]) {
+    if (this.collectionName === 'missions' && ++arrived >= n) open();
+    if (this.collectionName === 'missions') await gate;
+    return (orig as (...a: unknown[]) => Promise<never>).apply(this, args);
+  });
+}
+
+describe('concurrent sync of the same op', () => {
+  it('10 concurrent complete syncs apply once and all resolve to the same reportId', async () => {
+    const h = await session();
+    const m = await started(h);
+    const op = { opId: uuid(), missionId: m.id, clientTs: now(), type: 'complete' };
+    barrierOnMissionReads(10);
+    const first = (await Promise.all(Array.from({ length: 10 }, () => syncOps(h, [op])))).map((r) => r[0]);
+    vi.restoreAllMocks();
+    expect(first.filter((r) => r.status === 'applied')).toHaveLength(1);
+    expect(first.every((r) => ['applied', 'duplicate', 'retry'].includes(r.status))).toBe(true);
+    for (const r of first.filter((x) => x.status === 'retry')) expect(r.error?.code).toBe('IN_PROGRESS');
+    const reportId = first.find((r) => r.status === 'applied')!.result!.reportId;
+    expect(reportId).toBeTruthy();
+
+    const retried = await Promise.all(first.filter((r) => r.status === 'retry').map(() => syncOps(h, [op])));
+    for (const r of [...first.filter((x) => x.status === 'duplicate'), ...retried.map((x) => x[0])]) {
+      expect(r).toMatchObject({ status: 'duplicate', result: { originalStatus: 'applied', reportId } });
+    }
+    expect(await reportCount(m.id)).toBe(1);
+    expect(await record(op.opId)).toMatchObject({ status: 'applied', result: { reportId } });
+    expect((await request(app).get(`${api}/missions/${m.id}`).set(h)).body).toMatchObject({ status: 'completed', reportId });
+  });
+
+  it('concurrent pause syncs apply once without caching a losing conflict', async () => {
+    const h = await session();
+    const m = await started(h);
+    const before = (await request(app).get(`${api}/missions/${m.id}`).set(h)).body.version as number;
+    const op = { opId: uuid(), missionId: m.id, clientTs: now(), type: 'pause' };
+    barrierOnMissionReads(10);
+    const results = (await Promise.all(Array.from({ length: 10 }, () => syncOps(h, [op])))).map((r) => r[0]);
+    vi.restoreAllMocks();
+    expect(results.filter((r) => r.status === 'applied')).toHaveLength(1);
+    expect(results.some((r) => r.status === 'conflict')).toBe(false);
+    expect((await request(app).get(`${api}/missions/${m.id}`).set(h)).body).toMatchObject({ status: 'paused', version: before + 1 });
+    expect(await record(op.opId)).toMatchObject({ status: 'applied' });
+    expect((await syncOps(h, [op]))[0]).toMatchObject({ status: 'duplicate', result: { originalStatus: 'applied' } });
+  });
+
+  it('an op held by a live lease is "retry" and stops the batch; an expired lease is taken over', async () => {
+    const h = await session();
+    const m = await started(h);
+    const ownerId = await ownerOf(m.id);
+    const pause = { opId: uuid(), missionId: m.id, clientTs: now(), type: 'pause' };
+    const obs = { opId: uuid(), missionId: m.id, clientTs: now(), type: 'observation', payload: { attribute: 'noise_level', value: 'quiet' } };
+    await col('sync_records').insertOne({ opId: pause.opId, ownerId, status: 'pending', lease: 'other', leaseUntil: new Date(Date.now() + 60_000), serverTs: new Date() });
+    const held = await syncOps(h, [pause, obs]);
+    expect(held).toEqual([expect.objectContaining({ opId: pause.opId, status: 'retry', error: expect.objectContaining({ code: 'IN_PROGRESS' }) })]);
+    expect(await record(obs.opId)).toBeNull();
+    expect((await request(app).get(`${api}/missions/${m.id}`).set(h)).body.status).toBe('active');
+
+    await col('sync_records').updateOne({ opId: pause.opId }, { $set: { leaseUntil: new Date(Date.now() - 1) } });
+    expect((await syncOps(h, [pause, obs])).map((r) => r.status)).toEqual(['applied', 'applied']);
+    expect(await record(pause.opId)).toMatchObject({ status: 'applied' });
+    expect((await record(pause.opId))!.lease).toBeUndefined();
+  });
+
+  it('a server error releases the op instead of caching it, and the retry applies it once', async () => {
+    const h = await session();
+    const m = await started(h);
+    const op = { opId: uuid(), missionId: m.id, clientTs: now(), type: 'complete' };
+    failNextReportInsert();
+    await request(app).post(`${api}/sync`).set(h).send({ ops: [op] }).expect(500);
+    expect(await record(op.opId)).toBeNull();
+    const [r] = await syncOps(h, [op]);
+    const mission = (await request(app).get(`${api}/missions/${m.id}`).set(h)).body as Mission;
+    expect(r).toMatchObject({ status: 'applied', result: { missionStatus: 'completed', reportId: mission.reportId } });
+    expect(await reportCount(m.id)).toBe(1);
+    expect(await record(op.opId)).toMatchObject({ status: 'applied' });
+  });
+
+  it("another owner reusing an opId sees neither the result nor affects the mission", async () => {
+    const h = await session();
+    const other = await session();
+    const m = await started(h);
+    const op = { opId: uuid(), missionId: m.id, clientTs: now(), type: 'complete' };
+    const [mine] = await syncOps(h, [op]);
+    const [theirs] = await syncOps(other, [op]);
+    expect(theirs).toEqual({ opId: op.opId, status: 'rejected', error: { code: 'OPID_CONFLICT', message: 'opId already used' } });
+    const [fresh] = await syncOps(other, [{ ...op, opId: uuid(), type: 'cancel' }]);
+    expect(fresh).toMatchObject({ status: 'rejected', error: { code: 'NOT_FOUND' } });
+    expect(await record(op.opId)).toMatchObject({ ownerId: await ownerOf(m.id), status: 'applied', result: { reportId: mine.result!.reportId } });
+  });
+});
+
 describe('cross-session isolation', () => {
   it('another session cannot complete, observe or read the mission or its report', async () => {
     const h = await session();

@@ -280,7 +280,8 @@ export interface Report {
 
 export interface SyncResult {
   opId: string;
-  status: 'applied' | 'duplicate' | 'conflict' | 'rejected';
+  /** `retry` is transient (op in progress elsewhere, or lost a concurrent write): resend the same op later. */
+  status: 'applied' | 'duplicate' | 'conflict' | 'rejected' | 'retry';
   result?: unknown;
   error?: { code: string; message: string; details?: unknown };
 }

@@ -78,6 +78,14 @@ describe('offline op queue', () => {
     expect((await listOps()).map((o) => o.opId)).toEqual([ok.opId]);
   });
 
+  it('backs off and resends ops the server says to retry, never turning them into conflicts', async () => {
+    const op = await enqueue({ type: 'complete', missionId: 'm1' });
+    await flush(async () => [{ opId: op.opId, status: 'retry', error: { code: 'IN_PROGRESS', message: 'in progress' } }], 0);
+    expect((await listOps())[0]).toMatchObject({ state: 'failed', attempts: 1, nextAttemptAt: backoffMs(1), lastError: 'in progress' });
+    await flush(async (ops) => applied(ops), backoffMs(1));
+    expect((await listOps())[0].state).toBe('synced');
+  });
+
   it('resends ops left in "syncing" by a crash', async () => {
     await enqueue({ type: 'start', missionId: 'm1' });
     let release!: () => void;

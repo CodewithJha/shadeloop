@@ -6,6 +6,7 @@ import { col } from './db.ts';
 import { AppError } from './errors.ts';
 import { recomputeEvidence, missionView, reportView, type MissionDoc, type ObservationDoc } from './missions.ts';
 import { tigerForget } from './tiger.ts';
+import { forgetMemory } from './providers.ts';
 
 type OwnerDoc = { _id: string; tokenHash: string; createdAt: Date; lastSeenAt: Date };
 
@@ -126,7 +127,13 @@ export async function deleteData(ownerId: string) {
     .toArray();
   const counts = await Promise.all(OWNED.map((c) => col(c).deleteMany({ ownerId })));
   for (const { _id } of touched) await recomputeEvidence(_id.l, _id.a);
-  await col<OwnerDoc>('owners').deleteOne({ _id: ownerId });
+  const owner = await col<OwnerDoc & { backboardAssistantId?: string }>('owners').findOneAndDelete({ _id: ownerId });
   const tigerRows = await tigerForget(ownerId);
-  return { deleted: Object.fromEntries(OWNED.map((c, i) => [c, counts[i].deletedCount])), evidenceRecomputed: touched.length, tigerRowsDeleted: tigerRows };
+  const memoryDeleted = owner?.backboardAssistantId ? await forgetMemory(owner.backboardAssistantId) : null;
+  return {
+    deleted: Object.fromEntries(OWNED.map((c, i) => [c, counts[i].deletedCount])),
+    evidenceRecomputed: touched.length,
+    tigerRowsDeleted: tigerRows,
+    backboardMemoryDeleted: memoryDeleted,
+  };
 }

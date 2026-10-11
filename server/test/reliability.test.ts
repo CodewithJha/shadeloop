@@ -295,3 +295,41 @@ describe('Tiger Data hourly patterns', () => {
     expect((await request(app).delete(`${api}/me`).set('authorization', `Bearer ${token}`)).body.tigerRowsDeleted).toBeNull();
   });
 });
+
+describe('Backboard request memory', () => {
+  afterEach(() => {
+    delete env.BACKBOARD_API_KEY;
+  });
+
+  it('is opt-in, saves and recalls only the owner\'s requests, and is deleted with the owner', async () => {
+    env.BACKBOARD_API_KEY = 'test-key';
+    const seen: string[] = [];
+    routes = (url, init) => {
+      if (!url.startsWith('https://app.backboard.io/api/')) throw new Error(`unexpected ${url}`);
+      const path = url.slice('https://app.backboard.io/api'.length);
+      seen.push(`${init?.method ?? 'GET'} ${path}`);
+      if (path === '/assistants') return json({ assistant_id: 'a1' });
+      if (path === '/assistants/a1/memories') return json({ memory_id: 'm1' }, 201);
+      if (path === '/assistants/a1/memories/search') return json({ memories: [{ content: 'no stairs please, bad knee' }] });
+      if (path === '/assistants/a1') return json({ message: 'deleted' });
+      throw new Error(`unexpected ${path}`);
+    };
+    const token = (await request(app).post(`${api}/sessions`).send({})).body.token as string;
+    const h = { authorization: `Bearer ${token}` };
+    const planWith = (prompt: string) => request(app).post(`${api}/missions/plan`).set(h).send({ prompt, availableMinutes: 15 });
+
+    expect((await planWith('no stairs please, bad knee')).body.planning.memory).toBeNull();
+    expect(seen).toEqual([]);
+
+    const prefs = (await request(app).get(`${api}/preferences`).set(h)).body;
+    await request(app).put(`${api}/preferences`).set(h).send({ ...prefs, privacy: { ...prefs.privacy, rememberRequests: true } }).expect(200);
+    expect((await planWith('no stairs please, bad knee')).body.planning.memory).toEqual({ provider: 'backboard', recalled: 0, saved: true });
+    expect(seen).toEqual(['POST /assistants', 'POST /assistants/a1/memories']);
+
+    expect((await planWith('a quiet sit')).body.planning.memory).toEqual({ provider: 'backboard', recalled: 1, saved: true });
+    expect(seen.slice(2)).toEqual(['POST /assistants/a1/memories/search', 'POST /assistants/a1/memories']);
+
+    expect((await request(app).delete(`${api}/me`).set(h)).body.backboardMemoryDeleted).toBe(true);
+    expect(seen.at(-1)).toBe('DELETE /assistants/a1');
+  });
+});

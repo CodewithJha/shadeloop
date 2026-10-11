@@ -65,8 +65,9 @@ describe('health and errors', () => {
       sentry: 'NOT_CONFIGURED',
       'tiger-data': 'NOT_CONFIGURED',
       elevenlabs: 'NOT_CONFIGURED',
+      backboard: 'NOT_CONFIGURED',
     });
-    expect(r.body.notImplemented).toEqual(['mastra', 'temporal', 'backboard', 'tabpfn']);
+    expect(r.body.notImplemented).toEqual(['mastra', 'temporal', 'tabpfn']);
   });
   it('requires a session token and uses the error envelope', async () => {
     const r = await request(app).get(`${api}/missions`).expect(401);

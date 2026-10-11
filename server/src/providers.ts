@@ -237,6 +237,60 @@ export async function getWeather(rawOrigin: Coords): Promise<WeatherView> {
   }
 }
 
+/* Backboard memory: one assistant per owner who opted in, holding only that owner's own planning requests. */
+
+const owners = () => col<{ _id: string; backboardAssistantId?: string }>('owners');
+
+async function backboard<T>(what: string, path: string, init: RequestInit = {}): Promise<T> {
+  try {
+    const res = await fetchOk('Backboard', `https://app.backboard.io/api${path}`, {
+      ...init,
+      headers: { 'x-api-key': env.BACKBOARD_API_KEY!, 'content-type': 'application/json' },
+    });
+    const out = (await res.json()) as T;
+    recordCall('backboard', true, what);
+    return out;
+  } catch (e) {
+    recordCall('backboard', false, `${what}: ${errorText(e)}`);
+    throw e;
+  }
+}
+
+/** Earlier requests by this owner that relate to `query`. Empty when the owner has nothing saved or Backboard fails. */
+export async function recall(ownerId: string, query: string): Promise<string[]> {
+  const id = (await owners().findOne({ _id: ownerId }))?.backboardAssistantId;
+  if (!id) return [];
+  const r = await backboard<{ memories?: { content?: unknown }[] }>('memories searched', `/assistants/${id}/memories/search`, {
+    method: 'POST',
+    body: JSON.stringify({ query, limit: 3 }),
+  }).catch(() => ({ memories: [] }));
+  return (r.memories ?? []).map((m) => m.content).filter((c): c is string => typeof c === 'string');
+}
+
+export async function remember(ownerId: string, content: string): Promise<boolean> {
+  try {
+    let id = (await owners().findOne({ _id: ownerId }))?.backboardAssistantId;
+    if (!id) {
+      const a = await backboard<{ assistant_id: string }>('assistant created', '/assistants', {
+        method: 'POST',
+        body: JSON.stringify({ name: 'ShadeLoop request memory', system_prompt: "Remembers one person's requests for short outdoor activities." }),
+      });
+      id = a.assistant_id;
+      await owners().updateOne({ _id: ownerId }, { $set: { backboardAssistantId: id } });
+    }
+    await backboard('memory saved', `/assistants/${id}/memories`, { method: 'POST', body: JSON.stringify({ content }) });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export const forgetMemory = (assistantId: string) =>
+  backboard<unknown>('assistant deleted', `/assistants/${assistantId}`, { method: 'DELETE' }).then(
+    () => true,
+    () => false,
+  );
+
 /** ElevenLabs text to speech (MP3). Step texts repeat across users, so audio is cached like other provider results. */
 export async function speak(text: string): Promise<Buffer> {
   try {

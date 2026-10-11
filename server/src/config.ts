@@ -26,6 +26,7 @@ const Env = z
     SENTRY_DSN: z.url().optional(),
     TIGER_DATABASE_URL: z.string().regex(/^postgres(ql)?:\/\//, 'must be a postgres:// URL').optional(),
     ELEVENLABS_API_KEY: z.string().min(1).optional(),
+    BACKBOARD_API_KEY: z.string().min(1).optional(),
     ELEVENLABS_VOICE_ID: z.string().regex(/^\w+$/).default('JBFqnCBsd6RMkjVDRZzb'),
   })
   .refine((e) => !(e.NODE_ENV === 'production' && e.MONGODB_URI === 'memory'), {

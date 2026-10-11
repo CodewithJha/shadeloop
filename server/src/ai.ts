@@ -199,6 +199,7 @@ export async function aiProposeMissions(input: {
   preferred: string[];
   locations: { id: string; name: string; category: string; maxStepMinutes: number; evidence: Record<string, string> }[];
   weather: string;
+  rememberedRequests: string[];
 }) {
   const system = [
     'You design short, safe outdoor micro-missions (5-120 minutes) for one person.',
@@ -211,6 +212,7 @@ export async function aiProposeMissions(input: {
     '- Public places only. No private property, no closed areas. No medical or health advice.',
     '- observationPrompts must be attribute names from: bench_availability, shade_quality, noise_level, crowding, path_condition, step_free_access, temperature_feel.',
     '- Keep text plain, concrete and kind. whyItMatches explains the fit using only supplied facts.',
+    '- rememberedRequests are this person\'s own earlier requests. Respect needs they stated (for example avoiding stairs) in steps and wording, but never claim a place meets them.',
   ].join('\n');
   return aiJson('propose_missions', system, JSON.stringify(input), Proposals);
 }

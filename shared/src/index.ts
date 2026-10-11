@@ -155,9 +155,9 @@ export const Preferences = z
       .strict()
       .default({ readStepsAloud: false, voiceNotes: false }),
     privacy: z
-      .object({ useCoarseLocation: z.boolean().default(false) })
+      .object({ useCoarseLocation: z.boolean().default(false), rememberRequests: z.boolean().default(false) })
       .strict()
-      .default({ useCoarseLocation: false }),
+      .default({ useCoarseLocation: false, rememberRequests: false }),
   })
   .strict();
 export type Preferences = z.infer<typeof Preferences>;

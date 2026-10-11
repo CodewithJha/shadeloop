@@ -17,7 +17,7 @@ import {
   type SyncResult,
   type WeatherView,
 } from '@shadeloop/shared';
-import { RULES } from './config.ts';
+import { env, RULES } from './config.ts';
 import { col, isDuplicateKey } from './db.ts';
 import {
   compareObservation,
@@ -37,7 +37,7 @@ import {
 import { AppError, notFound } from './errors.ts';
 import { aiParseRequest, aiProposeMissions, type AiMeta } from './ai.ts';
 import { buildTemplate, keywordConstraints, relatedTypes, templateSummary } from './fallback.ts';
-import { discover, getWeather, loadLocations, type DiscoveryResult } from './providers.ts';
+import { discover, getWeather, loadLocations, recall, remember, type DiscoveryResult } from './providers.ts';
 import { span, tool } from './integrations.ts';
 import { tigerRecord } from './tiger.ts';
 import { getPrefs } from './account.ts';
@@ -211,6 +211,9 @@ async function plan(ownerId: string, input: PlanRequest) {
   const availableMinutes = input.availableMinutes ?? parsed.availableMinutes ?? prefs.defaultMinutes;
   const { required, preferred } = mergeConditions(prefs, { required: input.required, preferred: input.preferred }, parsed);
 
+  const memoryOn = Boolean(input.prompt && prefs.privacy.rememberRequests && env.BACKBOARD_API_KEY);
+  const remembered = memoryOn ? await tool('recall_memory', () => recall(ownerId, input.prompt!)) : [];
+
   const origin = input.coarseLocation;
   // Weather needs only the origin, so it runs alongside discovery. It never rejects (failures become `available: false`).
   const weatherP = origin ? tool('get_weather', () => getWeather(origin)) : Promise.resolve(null);
@@ -255,6 +258,7 @@ async function plan(ownerId: string, input: PlanRequest) {
       })),
     ],
     weather: weather?.available ? `${weather.temperatureC}°C, feels ${weather.apparentTemperatureC}°C, precipitation ${weather.precipitationMm} mm` : 'unknown',
+    rememberedRequests: remembered,
   });
   const rejected: string[] = [];
   let accepted: (ValidatedCandidate & { aiText?: string })[] = [];
@@ -366,6 +370,7 @@ async function plan(ownerId: string, input: PlanRequest) {
     appliedOpIds: [],
   }));
   await missions().insertMany(docs);
+  const saved = memoryOn && (await tool('save_memory', () => remember(ownerId, input.prompt!)));
 
   return {
     planId,
@@ -376,6 +381,7 @@ async function plan(ownerId: string, input: PlanRequest) {
       generation: { ...provenance, attempts: ai.meta.attempts, rejectedCandidates: rejected },
       weather,
       discovery: discovery && { mode: discovery.mode, sources: discovery.sources, limitations: discovery.limitations },
+      memory: memoryOn ? { provider: 'backboard', recalled: remembered.length, saved } : null,
     },
   };
 }

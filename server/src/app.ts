@@ -60,7 +60,7 @@ const Page = z.object({
 });
 const CompleteBody = CompletePayload.extend({ clientTs: TransitionPayload.shape.clientTs, sentAt: TransitionPayload.shape.sentAt });
 
-const NOT_IMPLEMENTED = ['mastra', 'temporal', 'backboard', 'tabpfn'];
+const NOT_IMPLEMENTED = ['mastra', 'temporal', 'tabpfn'];
 
 const owner = (res: Response) => res.locals.ownerId as string;
 
@@ -151,6 +151,13 @@ export function createApp() {
         status: statusFrom({ name: 'tiger-data', enabled: true, configured: Boolean(env.TIGER_DATABASE_URL), needsConfig: true }),
         detail: env.TIGER_DATABASE_URL ? 'Configured. Status reflects the last real call.' : 'Set TIGER_DATABASE_URL to enable',
         lastCall: lastCall('tiger-data'),
+      },
+      {
+        name: 'backboard',
+        role: "Opt-in memory of a person's own earlier requests, used when planning",
+        status: statusFrom({ name: 'backboard', enabled: true, configured: Boolean(env.BACKBOARD_API_KEY), needsConfig: true }),
+        detail: env.BACKBOARD_API_KEY ? 'Key present. Used only for people who turn on "Remember my requests".' : 'Set BACKBOARD_API_KEY to enable',
+        lastCall: lastCall('backboard'),
       },
       {
         name: 'elevenlabs',

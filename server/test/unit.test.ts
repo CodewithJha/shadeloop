@@ -317,7 +317,7 @@ describe('AI output validation', () => {
   });
   it('falls back when the provider is unreachable', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('fetch failed')));
-    const r = await aiProposeMissions({ request: 'x', missionType: 'quiet_break', availableMinutes: 10, maxWalkMinutes: 10, timeOfDay: 'any', required: [], preferred: [], locations: [], weather: 'unknown' });
+    const r = await aiProposeMissions({ request: 'x', missionType: 'quiet_break', availableMinutes: 10, maxWalkMinutes: 10, timeOfDay: 'any', required: [], preferred: [], locations: [], weather: 'unknown', rememberedRequests: [] });
     expect(r).toMatchObject({ data: null, meta: { fallbackUsed: true, fallbackReason: 'fetch failed' } });
   });
   it('does not echo model output in fallback reasons', async () => {

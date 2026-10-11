@@ -5,6 +5,7 @@ import type { Mission, Report } from '@shadeloop/shared';
 import { closeDb, col, connectDb } from '../src/db.ts';
 import { createApp } from '../src/app.ts';
 import { clearProviderCache } from '../src/providers.ts';
+import { env, RULES } from '../src/config.ts';
 
 type Route = (url: string, init?: RequestInit) => Response;
 const json = (b: unknown) => new Response(JSON.stringify(b), { status: 200, headers: { 'content-type': 'application/json' } });
@@ -134,6 +135,105 @@ describe('planning with AI up', () => {
       expect(planning.generation.rejectedCandidates.length).toBe(1);
     }
   });
+  const stepsFit = (m: Mission, available: number) => {
+    expect(m.steps.reduce((s, x) => s + x.minutes, 0) + (m.travel?.minutesRoundTrip ?? 0)).toBe(m.estimatedMinutes);
+    expect(m.estimatedMinutes).toBeLessThanOrEqual(available);
+    for (const s of m.steps) {
+      expect(s.minutes).toBeGreaterThanOrEqual(1);
+      expect(s.minutes).toBeLessThanOrEqual(RULES.maxStepMinutes);
+      expect(s.text).not.toMatch(RULES.durationPattern);
+    }
+  };
+  it('rejects AI step text that states a duration, even when minutes are shortened, and falls back honestly', async () => {
+    for (const text of ['Sit under a tree for 10 minutes', 'Rest here for half an hour', 'Count leaves for ten minutes']) {
+      routes = aiRoutes({ ...good, steps: [{ text, minutes: 30, kind: 'observe' }] });
+      const { missions, planning } = await plan(await session(), { prompt: 'twenty minutes looking at plants' });
+      expect(planning.generation.rejectedCandidates).toHaveLength(1);
+      expect(missions[0].provenance).toMatchObject({ generator: 'template', fallbackUsed: true });
+      expect(missions[0].provenance.fallbackReason).toMatch(/all AI candidates failed constraints: "Leaf count": text states a duration/);
+      for (const m of missions) stepsFit(m, 20);
+    }
+  });
+  it('falls back with the validation reason on malformed or missing step durations', async () => {
+    for (const steps of [[{ text: 'Find a tree', kind: 'observe' }], [{ text: 'Find a tree', minutes: '5', kind: 'observe' }], [{ text: 'Find a tree', minutes: 5, kind: 'run' }], []]) {
+      routes = aiRoutes({ ...good, steps });
+      const { missions } = await plan(await session(), { prompt: 'twenty minutes looking at plants' });
+      expect(missions[0].provenance).toMatchObject({ generator: 'template', fallbackUsed: true });
+      expect(missions[0].provenance.fallbackReason).toMatch(/^invalid output at missions\.0\.steps/);
+      for (const m of missions) stepsFit(m, 20);
+    }
+  });
+  it('fits overshooting AI step durations into every budget', async () => {
+    const steps = ['Find a tree', 'Count leaf shapes', 'Note the shade'].map((text) => ({ text, minutes: 40, kind: 'observe' }));
+    routes = aiRoutes({ ...good, steps });
+    for (const available of [10, 20, 45, 90]) {
+      const { missions } = await plan(await session(), { prompt: 'looking at plants', availableMinutes: available });
+      expect(missions[0].provenance.generator).toBe('ai');
+      for (const m of missions) stepsFit(m, available);
+    }
+  });
+});
+
+describe('completion report summary', () => {
+  let chatCalls = 0;
+  const run = async (scenario: Route, complete: object = { actualMinutes: 7 }) => {
+    chatCalls = 0;
+    routes = (url, init) => {
+      if (url.includes('/api/chat')) chatCalls++;
+      return scenario(url, init);
+    };
+    const h = await session();
+    const [m] = (await plan(h)).missions;
+    await request(app).post(`${api}/missions/${m.id}/start`).set(h).send({}).expect(200);
+    await observe(h, m.id, 'crowding', 'busy').expect(201);
+    const callsBeforeCompletion = chatCalls;
+    const done = await request(app).post(`${api}/missions/${m.id}/complete`).set(h).send(complete).expect(200);
+    const report = (await request(app).get(`${api}/reports/${done.body.reportId}`).set(h).expect(200)).body as Report;
+    expect(chatCalls, 'AI called during completion').toBe(callsBeforeCompletion);
+    return { m, report };
+  };
+  // An AI that would overstate if it were ever asked for a summary.
+  const chatty: Route = (url) =>
+    url.includes('/api/chat') ? json({ message: { content: JSON.stringify({ summary: 'It was busier than anticipated and safer than expected.' }) } }) : down(url);
+
+  it('is template-derived from recorded facts and never asks the AI, even when the AI would overstate', async () => {
+    const { m, report } = await run(chatty);
+    expect(report.comparisons).toEqual([{ attribute: 'crowding', expected: null, expectedConfidence: 'unknown', observed: 'busy', result: 'no_expectation' }]);
+    expect(report.summary).toEqual({
+      text: `Completed "${m.title}" in about 7 min (planned ${m.estimatedMinutes}). You recorded 1 observation.`,
+      generator: 'template',
+      provider: null,
+      model: null,
+      fallbackUsed: false,
+      fallbackReason: null,
+    });
+    expect(report.summary.text).not.toMatch(/busier|safer|anticipated/i);
+    expect(Object.keys(report)).not.toContain('aiNarrative');
+  });
+  it('uses the timestamp duration when the user gives none', async () => {
+    const { m, report } = await run(down, {});
+    expect(report.actual).toMatchObject({ minutesSource: 'timestamps', minutes: 0 });
+    expect(report.summary.text).toBe(`Completed "${m.title}" in about 0 min (planned ${m.estimatedMinutes}). You recorded 1 observation.`);
+  });
+  it('is the same whether the AI is disabled, unreachable, timing out or returning invalid output', async () => {
+    const timeout: Route = (url) => {
+      if (url.includes('/api/chat')) throw new DOMException('The operation timed out.', 'TimeoutError');
+      return down(url);
+    };
+    const invalid: Route = (url) => (url.includes('/api/chat') ? json({ message: { content: '{"missions": "nope"}' } }) : down(url));
+    const texts: string[] = [];
+    for (const scenario of [down, timeout, invalid]) texts.push((await run(scenario)).report.summary.text);
+    env.AI_PROVIDER = 'none';
+    try {
+      const { report } = await run(chatty);
+      texts.push(report.summary.text);
+      expect(chatCalls).toBe(0);
+    } finally {
+      env.AI_PROVIDER = 'ollama';
+    }
+    expect(new Set(texts).size).toBe(1);
+    expect(texts[0]).toMatch(/^Completed "Quiet break outside" in about 7 min \(planned \d+\)\. You recorded 1 observation\.$/);
+  });
 });
 
 describe('mission lifecycle', () => {
@@ -205,7 +305,7 @@ describe('field truth loop (end to end)', () => {
     expect(first.report.comparisons.find((c) => c.attribute === 'shade_quality')).toMatchObject({ expected: null, result: 'no_expectation' });
     expect(first.report.comparisons.find((c) => c.attribute === 'temperature_feel')?.result).toBe('observed_higher_than_expected');
     expect(first.report.evidenceRefs[0]).toMatchObject({ attribute: 'shade_quality', confidence: 'low', estimate: 'none', supporting: 1 });
-    expect(first.report.summary).toMatchObject({ generator: 'template', fallbackUsed: true });
+    expect(first.report.summary).toMatchObject({ generator: 'template', fallbackUsed: false, fallbackReason: null });
 
     await runOnce('none');
     const third = await runOnce('none');

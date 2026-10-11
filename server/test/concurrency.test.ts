@@ -137,7 +137,10 @@ describe('report persistence and recovery', () => {
     expect(report).toMatchObject({ id: mission.reportId, missionId: m.id, feedback: { rating: 5, text: 'nice' } });
     expect(report.actual.observations).toHaveLength(1);
     expect(report.summary).toMatchObject({ generator: 'template', provider: null });
+    expect(report.summary.text).toBe(`Completed "${m.title}" in about ${report.actual.minutes} min (planned ${m.estimatedMinutes}). You recorded 1 observation.`);
     expect(await reportCount(m.id)).toBe(1);
+    const again = (await request(app).get(`${api}/reports/${mission.reportId}`).set(h).expect(200)).body as Report;
+    expect(again.summary).toEqual(report.summary);
   });
 
   it('a repeated complete also heals a missing report, and so does history', async () => {
@@ -171,9 +174,14 @@ describe('report persistence and recovery', () => {
     const h = await session();
     const m = await started(h);
     const first = await complete(h, m.id).expect(200);
+    const getSummary = async () => ((await request(app).get(`${api}/reports/${first.body.reportId}`).set(h).expect(200)).body as Report).summary;
+    const summary = await getSummary();
     const results = await Promise.all([complete(h, m.id), complete(h, m.id), complete(h, m.id, { rating: 1 })]);
     for (const r of results) expect(r.status === 200 && r.body.reportId).toBe(first.body.reportId);
     expect(await reportCount(m.id)).toBe(1);
+    expect(await getSummary()).toEqual(summary);
+    const hist = await request(app).get(`${api}/history`).set(h).expect(200);
+    expect(hist.body.items.find((i: { mission: Mission }) => i.mission.id === m.id).report.summary).toBe(summary.text);
   });
 
   it('concurrent completes produce one report', async () => {

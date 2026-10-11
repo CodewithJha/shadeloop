@@ -149,7 +149,7 @@ export const Candidate = z.object({
   objective: z.string().trim().min(5).max(200),
   locationId: z.string().max(200).nullable(),
   steps: z
-    .array(z.object({ text: z.string().trim().min(3).max(240), minutes: z.number().int().min(1).max(RULES.maxStepMinutes), kind: z.enum(['walk', 'still', 'observe']) }))
+    .array(z.object({ text: z.string().trim().min(3).max(240).describe('Instruction only. Never state a duration here: it goes in minutes.'), minutes: z.number().int().min(1).max(RULES.maxStepMinutes), kind: z.enum(['walk', 'still', 'observe']) }))
     .min(1)
     .max(RULES.maxSteps),
   observationPrompts: z.array(AttributeName).min(1).max(7),
@@ -197,6 +197,11 @@ export function validateCandidate(c: Candidate, ctx: PlanContext) {
   const errors: string[] = [];
   const unsafe = findUnsafeText([c.title, c.description, c.objective, c.whyItMatches, ...c.steps.map((s) => s.text)].join('\n'));
   if (unsafe) errors.push(`unsafe text: "${unsafe}"`);
+  const duration = [c.title, c.description, c.objective, ...c.steps.map((s) => s.text)].join('\n').match(RULES.durationPattern);
+  if (duration) errors.push(`text states a duration ("${duration[0]}"); durations belong only in step minutes`);
+  if (c.steps.some((s) => !Number.isInteger(s.minutes) || s.minutes < 1 || s.minutes > RULES.maxStepMinutes)) {
+    errors.push(`step minutes must be whole numbers from 1 to ${RULES.maxStepMinutes}`);
+  }
   const loc = c.locationId ? ctx.locations.get(c.locationId) ?? null : null;
   if (c.locationId && !loc) errors.push('location not in supplied candidates');
   const travel = travelFor(loc, ctx.prefs);

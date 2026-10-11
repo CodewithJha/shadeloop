@@ -99,6 +99,12 @@ export const RULES = {
     /\brestricted area\b/i,
     /\b(cure|cures|diagnos\w*|medication|dosage|prescri\w*|therapy|therapeutic|treat (your|an?) )/i,
   ],
+  /**
+   * A duration stated in mission text ("10 minutes", "ten-minute", "half an hour", "quarter hour"). Durations live only
+   * in step `minutes`, which the engine may shorten, so text stating one could contradict them.
+   */
+  durationPattern:
+    /(?:(?:\d+(?:[.,]\d+)?|\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty|fifty|sixty|ninety|few|couple(?: of)?|several|half|quarter))\s*-?\s*(?:secs?|seconds?|mins?|minutes?|hrs?|hours?|h)|\ban?\s+(?:mins?|minutes?|hrs?|hours?))\b/i,
   baseSafetyNotes: [
     'Stay on public paths and spaces. Do not enter private property or closed areas.',
     'Stop and head back if you feel unwell, unsafe or too hot or cold. This app gives no medical advice.',

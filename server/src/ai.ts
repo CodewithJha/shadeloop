@@ -174,6 +174,7 @@ export async function aiProposeMissions(input: {
     'Rules you must follow:',
     '- locationId must be one of the supplied location ids, or null. Never invent places.',
     "- The sum of step minutes must not exceed the location's maxStepMinutes.",
+    '- Put each step\'s duration only in its "minutes" field. Never state a duration in any text (no "10 minutes", "half an hour"); minutes may be shortened to fit.',
     '- Steps of kind "walk" count against the walking limit.',
     '- Do not claim a place has shade, benches, quiet, access or is open; you only know the supplied evidence.',
     '- Public places only. No private property, no closed areas. No medical or health advice.',

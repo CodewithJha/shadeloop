@@ -1,6 +1,7 @@
 import { Writable } from 'node:stream';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ObservationInput, Preferences, SyncRequest, type EvidenceView, type LocationView } from '@shadeloop/shared';
+import { MISSION_TYPES, ObservationInput, Preferences, SyncRequest, type EvidenceView, type LocationView } from '@shadeloop/shared';
+import { RULES } from '../src/config.ts';
 import {
   checkCondition,
   compareObservation,
@@ -193,6 +194,49 @@ describe('constraint engine', () => {
     expect(buildTemplate('quiet_break', 4, 10, null)).toBeNull();
     expect(validateCandidate(buildTemplate('quiet_break', 5, 0, null)!, ctx({ availableMinutes: 5 })).ok).toBe(true);
   });
+  it('rejects text that states a duration, in digits or words', () => {
+    const phrases = [
+      'Sit on the bench for 10 minutes',
+      'Take a ten-minute pause',
+      'Rest for half an hour',
+      'Walk for a quarter hour',
+      'Breathe slowly, 5 mins',
+      'Stay 1.5 hrs if you like',
+      'Listen for thirty seconds',
+      'Pause for a minute',
+      'Spend twenty-five minutes here',
+      'Look around for a few minutes',
+    ];
+    for (const text of phrases) {
+      const v = validateCandidate(candidate({ steps: [{ text, minutes: 5, kind: 'still' }] }), ctx());
+      expect(!v.ok && v.errors.join(), text).toMatch(/states a duration/);
+    }
+    const v = validateCandidate(candidate({ description: 'A calm 15 minute sit somewhere shady.' }), ctx());
+    expect(!v.ok && v.errors.join()).toMatch(/states a duration/);
+    for (const text of ['Find a second bench nearby', 'Walk 200 m along the path', 'Notice the minute details', 'Take one slow breath']) {
+      expect(validateCandidate(candidate({ steps: [{ text, minutes: 5, kind: 'still' }] }), ctx()).ok, text).toBe(true);
+    }
+  });
+  it('rejects step minutes outside the configured bounds', () => {
+    for (const minutes of [0, 1.5, RULES.maxStepMinutes + 1]) {
+      const v = validateCandidate(candidate({ steps: [{ text: 'Sit', minutes, kind: 'still' }] }), ctx({ availableMinutes: 240 }));
+      expect(!v.ok && v.errors.join(), String(minutes)).toMatch(/step minutes/);
+    }
+  });
+  it('every template is a valid, duration-free mission for every time budget', () => {
+    for (const type of MISSION_TYPES) {
+      for (const budget of [5, 6, 10, 15, 20, 30, 45, 60, 90, 120]) {
+        for (const walk of [1, 10, 120]) {
+          const t = buildTemplate(type, budget, walk, null);
+          expect(t, `${type} ${budget} ${walk}`).not.toBeNull();
+          const v = validateCandidate(t!, ctx({ availableMinutes: budget, prefs: Preferences.parse({ maxWalkMinutes: walk }) }));
+          expect(v.ok, `${type} ${budget} ${walk}: ${!v.ok && v.errors.join()}`).toBe(true);
+          expect(t!.steps.reduce((s, x) => s + x.minutes, 0)).toBeLessThanOrEqual(budget);
+          for (const text of [t!.title, t!.description, t!.objective, ...t!.steps.map((s) => s.text)]) expect(text).not.toMatch(RULES.durationPattern);
+        }
+      }
+    }
+  });
 });
 
 describe('schemas and parsers', () => {
@@ -229,6 +273,13 @@ describe('schemas and parsers', () => {
     expect(templateSummary({ title: 'T', completionStatus: 'completed', plannedMinutes: 10, actualMinutes: 12, observationCount: 1, comparisons: [{ attribute: 'shade_quality', result: 'observed_lower_than_expected' }] })).toMatch(
       /shade quality \(lower than expected\)/,
     );
+  });
+  it('template summary states only recorded facts and compares only where an expectation existed', () => {
+    const base = { title: 'T', completionStatus: 'completed', plannedMinutes: 10, actualMinutes: 0, observationCount: 0, comparisons: [] };
+    expect(templateSummary(base)).toBe('Completed "T" in about 0 min (planned 10). No observations were recorded.');
+    const noExpectation = templateSummary({ ...base, completionStatus: 'partial', actualMinutes: 7, observationCount: 2, comparisons: [{ attribute: 'crowding', result: 'no_expectation' }, { attribute: 'noise_level', result: 'matched' }] });
+    expect(noExpectation).toBe('Partly completed "T" in about 7 min (planned 10). You recorded 2 observations.');
+    expect(noExpectation).not.toMatch(/busier|quieter|safer|accessible|than (expected|anticipated)/i);
   });
   it('rounds coordinates to a coarse grid', () => {
     expect(roundCoords({ lat: 12.97634, lon: 77.59291 })).toEqual({ lat: 12.98, lon: 77.59 });

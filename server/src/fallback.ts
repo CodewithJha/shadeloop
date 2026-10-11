@@ -1,5 +1,6 @@
 /** Deterministic, AI-free implementations so the full workflow runs without any model. */
 import type { Attribute, Condition, MissionType, ObservationValue } from '@shadeloop/shared';
+import { RULES } from './config.ts';
 import type { Candidate } from './domain.ts';
 
 type TemplateStep = { text: string; minutes: number; kind: 'walk' | 'still' | 'observe'; flex?: true };
@@ -84,7 +85,7 @@ export function buildTemplate(type: MissionType, stepBudget: number, walkBudget:
   const t = TEMPLATES[type];
   const fixed = t.steps.filter((s) => !s.flex).reduce((n, s) => n + s.minutes, 0);
   const flexStep = t.steps.find((s) => s.flex)!;
-  let flex = stepBudget - fixed;
+  let flex = Math.min(stepBudget - fixed, RULES.maxStepMinutes);
   if (flexStep.kind === 'walk') flex = Math.min(flex, walkBudget);
   if (flex < 1) return null;
   const place = location ? location.name : 'a nearby public outdoor spot you already know';

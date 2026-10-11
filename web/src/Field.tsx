@@ -328,7 +328,11 @@ export function Completion({ id }: { id: string }) {
       {report ? (
         <>
           <p>{report.summary.text}</p>
-          <p className="meta">{report.summary.generator === 'ai' ? `Summary written by ${report.summary.model} from your recorded facts.` : `Template summary (AI not used: ${report.summary.fallbackReason}).`}</p>
+          <p className="meta">
+            {report.summary.generator === 'ai'
+              ? `Older summary written by AI (${report.summary.model}); it may be inaccurate. The tables are the record.`
+              : 'Built by a fixed template from your recorded facts. No AI was used.'}
+          </p>
           {report.comparisons.length > 0 && (
             <table>
               <thead>

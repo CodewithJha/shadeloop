@@ -109,6 +109,9 @@ For a demo without network discovery, set `DISCOVERY_MODE=fixture`. Places are t
 - The public Overpass API is sometimes slow or returns 504. Planning then proceeds without named places and says so.
 - English only. Voice uses browser APIs only (Web Speech), where supported.
 - Offline changes the server refuses (for example observations for a mission that expired or was cancelled elsewhere) can't be applied. They stay on the device, held per mission, until you download or discard them. There is no merge.
+- Device clocks are corrected per sync request from the time the device says it sent it, so a wrong clock no longer loses data. Corrected times can be late by the request latency, and changing the device clock between recording and syncing shifts those events (they are clamped between the previous event and now). Clients without `sentAt` keep the old 5-minute rule.
+- Durations: you can enter 0–240 minutes; a duration measured from timestamps that is negative or over 240 minutes (e.g. a mission left running for days) is shown as unknown and left out of your totals. Entered minutes are not cross-checked against the measured time.
+- One invalid op in a sync batch (e.g. from an older app version) fails the whole request with 400, and the queue then holds every op of that batch as a conflict for you to retry or discard.
 - The repo lives at `~/ShadeLoop` (see docs/DECISIONS.md, item 0).
 
 ## License

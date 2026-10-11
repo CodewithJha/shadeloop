@@ -199,6 +199,8 @@ export async function planMissions(ownerId: string, input: PlanRequest) {
   const { required, preferred } = mergeConditions(prefs, { required: input.required, preferred: input.preferred }, parsed);
 
   const origin = input.coarseLocation;
+  // Weather needs only the origin, so it runs alongside discovery. It never rejects (failures become `available: false`).
+  const weatherP = origin ? getWeather(origin) : Promise.resolve(null);
   let locations: LocationView[] = [];
   let discovery: DiscoveryResult | null = null;
   if (input.locationIds?.length) locations = await loadLocations(input.locationIds, origin);
@@ -210,7 +212,7 @@ export async function planMissions(ownerId: string, input: PlanRequest) {
     .filter((l) => l.category !== 'bench')
     .concat(locations.filter((l) => l.category === 'bench'))
     .slice(0, RULES.maxDiscoveredLocations);
-  const weather = origin ? await getWeather(origin) : null;
+  const weather = await weatherP;
   const evidence = await loadEvidence(locations.map((l) => l.id));
   const ctx: PlanContext = { availableMinutes, prefs, required, preferred, locations: new Map(locations.map((l) => [l.id, l])), evidence };
   const typeOrder = input.missionType ? [missionType] : [missionType, ...relatedTypes(missionType)];

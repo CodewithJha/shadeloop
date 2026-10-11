@@ -1,25 +1,64 @@
 /** External data: place discovery (OpenStreetMap Overpass, SerpApi, dev fixture) and weather (Open-Meteo). */
 import type { Coords, LocationView, WeatherView } from '@shadeloop/shared';
-import { env } from './config.ts';
+import { env, RULES } from './config.ts';
 import { col } from './db.ts';
 import { distanceM, roundCoords } from './domain.ts';
 import { recordCall } from './integrations.ts';
 import { log } from './log.ts';
 
 const UA = 'ShadeLoop/0.1 (open-source outdoor companion)';
-const TTL_MS = 10 * 60_000;
 // ponytail: per-process cache keyed by coarse cell; move to a Mongo TTL collection if running several instances.
 const cache = new Map<string, { at: number; value: unknown }>();
 
+/** A hit returns the stored value as is (its `retrievedAt` stays the time of the real call). Failures aren't cached. */
 async function cached<T>(key: string, fn: () => Promise<T>): Promise<T> {
   const hit = cache.get(key);
-  if (hit && Date.now() - hit.at < TTL_MS) return hit.value as T;
+  if (hit && Date.now() - hit.at < RULES.providerCache.ttlMs) return hit.value as T;
   const value = await fn();
+  cache.delete(key);
   cache.set(key, { at: Date.now(), value });
+  // Map keeps insertion order, so the first keys are the oldest.
+  for (const k of cache.keys()) {
+    if (cache.size <= RULES.providerCache.maxEntries) break;
+    cache.delete(k);
+  }
   return value;
 }
 
-export const clearProviderCache = () => cache.clear();
+const cooldownUntil = new Map<string, number>();
+
+export const clearProviderCache = () => {
+  cache.clear();
+  cooldownUntil.clear();
+};
+
+/**
+ * Fetch that must return 2xx. A network error or 5xx is retried once; both attempts share one `HTTP_TIMEOUT_MS`
+ * budget and a timeout is not retried. A 429 is not retried either: the provider is left alone until it says so.
+ */
+async function fetchOk(provider: string, url: string | URL, init: RequestInit = {}): Promise<Response> {
+  const wait = (cooldownUntil.get(provider) ?? 0) - Date.now();
+  if (wait > 0) throw new Error(`${provider} rate limited us; not called for ${Math.ceil(wait / 1000)} s`);
+  const signal = AbortSignal.timeout(env.HTTP_TIMEOUT_MS);
+  for (let attempt = 1; ; attempt++) {
+    let res: Response | undefined;
+    let err: unknown;
+    try {
+      res = await fetch(url, { ...init, signal });
+    } catch (e) {
+      err = e;
+    }
+    if (res?.ok) return res;
+    if (res?.status === 429) {
+      const after = Number(res.headers.get('retry-after')) * 1000;
+      cooldownUntil.set(provider, Date.now() + Math.min(after > 0 ? after : RULES.providerCooldownMs, 10 * 60_000));
+    }
+    await res?.body?.cancel();
+    const transient = res ? res.status >= 500 : !signal.aborted;
+    if (attempt > 1 || !transient) throw err ?? new Error(`${provider} HTTP ${res!.status}`);
+    await new Promise((r) => setTimeout(r, RULES.providerRetryDelayMs));
+  }
+}
 
 type LocationDoc = Omit<LocationView, 'id' | 'distanceM'> & { _id: string; lastCheckedAt: string };
 
@@ -28,13 +67,11 @@ const errorText = (e: unknown) => ((e as Error).name === 'TimeoutError' ? 'timeo
 async function overpass(origin: Coords, radiusM: number): Promise<LocationView[]> {
   const around = `(around:${radiusM},${origin.lat},${origin.lon})`;
   const q = `[out:json][timeout:15];nwr["leisure"~"^(park|garden|nature_reserve)$"]${around};out center 30;node["amenity"="bench"]${around};out 15;`;
-  const res = await fetch(env.OVERPASS_URL, {
+  const res = await fetchOk('Overpass', env.OVERPASS_URL, {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded', 'user-agent': UA },
     body: new URLSearchParams({ data: q }),
-    signal: AbortSignal.timeout(env.HTTP_TIMEOUT_MS),
   });
-  if (!res.ok) throw new Error(`Overpass HTTP ${res.status}`);
   const body = (await res.json()) as {
     elements?: { type: string; id: number; lat?: number; lon?: number; center?: { lat: number; lon: number }; tags?: Record<string, string> }[];
   };
@@ -63,8 +100,7 @@ async function overpass(origin: Coords, radiusM: number): Promise<LocationView[]
 async function serpapi(origin: Coords, query: string): Promise<LocationView[]> {
   const url = new URL('https://serpapi.com/search.json');
   url.search = new URLSearchParams({ engine: 'google_maps', type: 'search', q: query, ll: `@${origin.lat},${origin.lon},15z`, api_key: env.SERPAPI_KEY! }).toString();
-  const res = await fetch(url, { signal: AbortSignal.timeout(env.HTTP_TIMEOUT_MS) });
-  if (!res.ok) throw new Error(`SerpApi HTTP ${res.status}`);
+  const res = await fetchOk('SerpApi', url);
   const body = (await res.json()) as {
     local_results?: { title?: string; place_id?: string; type?: string; gps_coordinates?: { latitude: number; longitude: number } }[];
   };
@@ -125,7 +161,12 @@ export async function discover(rawOrigin: Coords, radiusM = 1000, query = 'park'
   } else {
     const tasks: [string, () => Promise<LocationView[]>][] = [['openstreetmap', () => overpass(origin, radiusM)]];
     if (env.SERPAPI_KEY) tasks.push(['serpapi', () => serpapi(origin, query)]);
-    const results = await Promise.allSettled(tasks.map(([name, fn]) => cached(`${name}:${origin.lat},${origin.lon}:${radiusM}:${query}`, fn)));
+    // Keys hold only the rounded cell and what each source actually uses; the query (≤ 100 chars) is normalized.
+    const keys: Record<string, string> = {
+      openstreetmap: `osm:${origin.lat},${origin.lon}:${radiusM}`,
+      serpapi: `serpapi:${origin.lat},${origin.lon}:${query.trim().toLowerCase().replace(/\s+/g, ' ')}`,
+    };
+    const results = await Promise.allSettled(tasks.map(([name, fn]) => cached(keys[name], fn)));
     results.forEach((r, i) => {
       const name = tasks[i][0];
       if (r.status === 'fulfilled') {
@@ -162,7 +203,6 @@ export async function loadLocations(ids: string[], origin?: Coords): Promise<Loc
 
 export async function getWeather(rawOrigin: Coords): Promise<WeatherView> {
   const origin = roundCoords(rawOrigin);
-  const retrievedAt = new Date().toISOString();
   try {
     return await cached(`weather:${origin.lat},${origin.lon}`, async () => {
       const url = new URL(env.OPEN_METEO_URL);
@@ -171,8 +211,8 @@ export async function getWeather(rawOrigin: Coords): Promise<WeatherView> {
         longitude: String(origin.lon),
         current: 'temperature_2m,apparent_temperature,precipitation,wind_speed_10m,weather_code',
       }).toString();
-      const res = await fetch(url, { headers: { 'user-agent': UA }, signal: AbortSignal.timeout(env.HTTP_TIMEOUT_MS) });
-      if (!res.ok) throw new Error(`Open-Meteo HTTP ${res.status}`);
+      const res = await fetchOk('Open-Meteo', url, { headers: { 'user-agent': UA } });
+      const retrievedAt = new Date().toISOString();
       const { current: c } = (await res.json()) as {
         current?: { time: string; temperature_2m: number; apparent_temperature: number; precipitation: number; wind_speed_10m: number; weather_code: number };
       };
@@ -193,6 +233,6 @@ export async function getWeather(rawOrigin: Coords): Promise<WeatherView> {
   } catch (e) {
     const reason = errorText(e);
     recordCall('open-meteo', false, reason);
-    return { available: false, source: 'open-meteo', retrievedAt, reason };
+    return { available: false, source: 'open-meteo', retrievedAt: new Date().toISOString(), reason };
   }
 }

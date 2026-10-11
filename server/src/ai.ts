@@ -1,7 +1,7 @@
 /** AI providers (Ollama, OpenAI-compatible). Advisory only: output is Zod-validated and callers always have a deterministic fallback. */
 import { z } from 'zod';
 import { CONDITIONS, MissionType, ObservationValue, type Condition } from '@shadeloop/shared';
-import { env } from './config.ts';
+import { env, RULES } from './config.ts';
 import { log } from './log.ts';
 import { lastCall, recordCall, type IntegrationStatus } from './integrations.ts';
 import { Candidate } from './domain.ts';
@@ -103,11 +103,23 @@ export async function aiJson<T>(task: string, system: string, user: string, sche
   return { data: null, meta: { provider: p.name, model: p.model, attempts, fallbackUsed: true, fallbackReason: reason } };
 }
 
+type Probe = { status: IntegrationStatus; detail: string };
+let lastProbe: { at: number; provider: string; result: Promise<Probe> } | null = null;
+export const clearAiHealthCache = () => void (lastProbe = null);
+
+/** Health is public, so one live probe is shared by every caller for `RULES.aiHealthCacheMs`. */
 export async function aiHealth(): Promise<{ name: string; status: IntegrationStatus; detail: string; lastGeneration: ReturnType<typeof lastCall> }> {
   if (env.AI_PROVIDER === 'none') {
     return { name: 'ai', status: 'DISABLED', detail: 'AI_PROVIDER=none; deterministic templates are used', lastGeneration: null };
   }
   const name = `ai:${env.AI_PROVIDER}`;
+  if (!lastProbe || lastProbe.provider !== name || Date.now() - lastProbe.at >= RULES.aiHealthCacheMs) {
+    lastProbe = { at: Date.now(), provider: name, result: probeAi() };
+  }
+  return { name, ...(await lastProbe.result), lastGeneration: lastCall(name) };
+}
+
+async function probeAi(): Promise<Probe> {
   try {
     if (env.AI_PROVIDER === 'ollama') {
       const res = await fetch(`${env.OLLAMA_URL}/api/tags`, { signal: AbortSignal.timeout(3000) });
@@ -115,17 +127,17 @@ export async function aiHealth(): Promise<{ name: string; status: IntegrationSta
       const { models = [] } = (await res.json()) as { models?: { name: string }[] };
       const present = models.some((m) => m.name === env.OLLAMA_MODEL || m.name === `${env.OLLAMA_MODEL}:latest`);
       return present
-        ? { name, status: 'VERIFIED', detail: `Ollama reachable; model ${env.OLLAMA_MODEL} installed`, lastGeneration: lastCall(name) }
-        : { name, status: 'DEGRADED', detail: `Ollama reachable but model ${env.OLLAMA_MODEL} is not installed`, lastGeneration: lastCall(name) };
+        ? { status: 'VERIFIED', detail: `Ollama reachable; model ${env.OLLAMA_MODEL} installed` }
+        : { status: 'DEGRADED', detail: `Ollama reachable but model ${env.OLLAMA_MODEL} is not installed` };
     }
     const res = await fetch(`${env.OPENAI_BASE_URL!.replace(/\/$/, '')}/models`, {
       headers: { authorization: `Bearer ${env.OPENAI_API_KEY}` },
       signal: AbortSignal.timeout(5000),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return { name, status: 'VERIFIED', detail: 'OpenAI-compatible /models reachable with configured key', lastGeneration: lastCall(name) };
+    return { status: 'VERIFIED', detail: 'OpenAI-compatible /models reachable with configured key' };
   } catch (e) {
-    return { name, status: 'DEGRADED', detail: `health check failed: ${(e as Error).name === 'TimeoutError' ? 'timeout' : (e as Error).message}`, lastGeneration: lastCall(name) };
+    return { status: 'DEGRADED', detail: `health check failed: ${(e as Error).name === 'TimeoutError' ? 'timeout' : (e as Error).message}` };
   }
 }
 

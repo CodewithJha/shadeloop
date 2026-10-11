@@ -76,7 +76,8 @@ export function createApp() {
       },
     }),
   );
-  app.use(helmet());
+  // Outside production the app may be opened over plain HTTP on a LAN address, where upgrading requests breaks it.
+  app.use(helmet({ contentSecurityPolicy: { directives: { upgradeInsecureRequests: env.NODE_ENV === 'production' ? [] : null } } }));
 
   const limitHandler = (_req: Request, _res: Response, next: NextFunction) => next(new AppError(429, 'RATE_LIMITED', 'Too many requests, slow down'));
   const limiter = (limit: number) => rateLimit({ windowMs: 60_000, limit, standardHeaders: 'draft-8', legacyHeaders: false, handler: limitHandler });

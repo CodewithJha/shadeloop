@@ -19,8 +19,10 @@ export async function createOwner() {
 
 export async function ownerFromToken(token: string): Promise<string> {
   if (!/^[A-Za-z0-9_-]{43}$/.test(token)) throw new AppError(401, 'UNAUTHORIZED', 'Invalid session token');
-  const owner = await col<OwnerDoc>('owners').findOneAndUpdate({ tokenHash: hash(token) }, { $set: { lastSeenAt: new Date() } }, { projection: { _id: 1 } });
+  const owner = await col<OwnerDoc>('owners').findOne({ tokenHash: hash(token) }, { projection: { _id: 1, lastSeenAt: 1 } });
   if (!owner) throw new AppError(401, 'UNAUTHORIZED', 'Unknown session token');
+  const stale = new Date(Date.now() - RULES.ownerSeenWriteMs);
+  if (!(owner.lastSeenAt > stale)) await col<OwnerDoc>('owners').updateOne({ _id: owner._id, lastSeenAt: { $not: { $gt: stale } } }, { $set: { lastSeenAt: new Date() } });
   return owner._id;
 }
 

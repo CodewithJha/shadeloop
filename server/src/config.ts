@@ -67,6 +67,16 @@ export const RULES = {
   syncRecordTtlDays: 30,
   syncLeaseMs: 30_000, // how long a request may hold an op before another request can take it over
   minAnalyticsSamples: 5,
+  /** Place/weather results per process: entries live `ttlMs`; past `maxEntries` the oldest is dropped. */
+  providerCache: { maxEntries: 500, ttlMs: 10 * 60_000 },
+  /** Wait before the one retry of a network error or 5xx. Both attempts share `HTTP_TIMEOUT_MS`. */
+  providerRetryDelayMs: 500,
+  /** After a 429 a provider isn't called for its `Retry-After`, or this long without one (capped at 10 min). */
+  providerCooldownMs: 60_000,
+  /** `/health/dependencies` reuses one AI probe for this long, so the public endpoint can't drive provider calls. */
+  aiHealthCacheMs: 60_000,
+  /** `owners.lastSeenAt` is rewritten at most this often per session, not on every request. */
+  ownerSeenWriteMs: 60 * 60_000,
   evidence: {
     moderateMinIndependent: 3,
     conflictMinorityShare: 1 / 3,

@@ -300,6 +300,12 @@ describe('AI output validation', () => {
     expect(r.data).toEqual({ summary: 'fine' });
     expect(r.meta).toMatchObject({ attempts: 2, fallbackUsed: false, provider: 'ollama' });
   });
+  it('ignores a leading <thought> block (Gemma 4 on AI Studio)', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(reply('<thought>plan {not json}</thought>\n{"summary":"fine"}')));
+    const r = await aiJson('t', 'sys', 'user', schema);
+    expect(r.data).toEqual({ summary: 'fine' });
+    expect(r.meta.attempts).toBe(1);
+  });
   it('falls back after bounded retries on schema-invalid output', async () => {
     const fetchMock = vi.fn(async () => reply('{"summary":1}'));
     vi.stubGlobal('fetch', fetchMock);

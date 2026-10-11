@@ -76,6 +76,9 @@ export interface AiMeta {
   fallbackReason: string | null;
 }
 
+/** Gemma 4 on Google AI Studio prefixes JSON-mode replies with a `<thought>` block. */
+export const stripThought = (s: string) => s.replace(/<thought>[\s\S]*?<\/thought>/g, '').trim();
+
 /** Call the model, parse JSON, validate with Zod, retry a bounded number of times. Returns data=null when the caller must fall back. */
 export async function aiJson<T>(task: string, system: string, user: string, schema: z.ZodType<T>): Promise<{ data: T | null; meta: AiMeta }> {
   const p = provider();
@@ -86,7 +89,7 @@ export async function aiJson<T>(task: string, system: string, user: string, sche
   const attempts = env.AI_MAX_RETRIES + 1;
   for (let attempt = 1; attempt <= attempts; attempt++) {
     try {
-      const parsed = schema.safeParse(JSON.parse(await p.complete(sys, user, jsonSchema)));
+      const parsed = schema.safeParse(JSON.parse(stripThought(await p.complete(sys, user, jsonSchema))));
       if (parsed.success) {
         recordCall(`ai:${p.name}`, true, `${task}: valid output`);
         return { data: parsed.data, meta: { provider: p.name, model: p.model, attempts: attempt, fallbackUsed: false, fallbackReason: null } };

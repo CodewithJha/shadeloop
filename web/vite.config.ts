@@ -6,7 +6,8 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      registerType: 'autoUpdate',
+      // A new version waits until the user taps "Reload" (see main.tsx), so it never interrupts Field Mode or a form.
+      registerType: 'prompt',
       manifest: {
         name: 'ShadeLoop',
         short_name: 'ShadeLoop',
@@ -15,13 +16,20 @@ export default defineConfig({
         background_color: '#f6f4ee',
         display: 'standalone',
         start_url: '/',
-        icons: [{ src: '/icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' }],
+        scope: '/',
+        icons: [
+          { src: '/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+          { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+          { src: '/maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+          { src: '/icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' },
+        ],
       },
       workbox: {
         // App shell only. Mission data lives in IndexedDB, and API calls always go to the network.
-        globPatterns: ['**/*.{js,css,html,svg}'],
+        globPatterns: ['**/*.{js,css,html,svg,png}'],
         navigateFallback: '/index.html',
         navigateFallbackDenylist: [/^\/api\//],
+        cleanupOutdatedCaches: true,
       },
     }),
   ],

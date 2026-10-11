@@ -23,13 +23,15 @@ Codes: `VALIDATION_ERROR` 400, `INVALID_JSON` 400, `CLOCK_SKEW` 400 (only for re
 | `GET /health/dependencies` | Integration registry: `{status, dependencies[{name, role, status, detail, lastCall}], notImplemented[]}`. 503 if Mongo is down. Pings Mongo; the AI probe is reused for 60 s; place/weather statuses come from the last real call (no provider is called) |
 | `POST /sessions` | New anonymous session |
 | `POST /discovery/search` | `{lat, lon, radiusM?, query?}` → `{locations[], sources[], mode, limitations[]}`. Coordinates are rounded to 2 decimals before any external call. 503 if every live source fails |
-| `POST /missions/plan` | `{prompt?, availableMinutes?, missionType?, required?, preferred?, coarseLocation?, locationIds?}` → `201 {planId, missions[], planning{constraints, parse, generation, weather, discovery}}` |
+| `POST /missions/plan` | `{prompt?, availableMinutes?, missionType?, required?, preferred?, coarseLocation?, locationIds?}` → `201 {planId, missions[], planning{constraints, parse, generation, weather, discovery, memory}}`. `memory` is `{provider, recalled, saved}` when Backboard memory is on for this person, else `null` |
 | `GET /missions?page&limit&status=a,b` | Paginated `{items, page, limit, total}` |
 | `GET /missions/:id` | |
 | `POST /missions/:id/start\|pause\|resume\|cancel` | Optional `{clientTs, sentAt, currentStep}`. 409 on invalid transition |
 | `POST /missions/:id/complete` | Optional `{completionStatus, actualMinutes (integer 0–240), rating, feedback, currentStep, clientTs, sentAt}` → `{mission, reportId}`. `actualMinutes` outside 0–240 → 400 `VALIDATION_ERROR`. Repeating it on a completed mission returns the same `reportId` (the body is ignored), rebuilding the report if a crash left it missing |
 | `POST /missions/:id/observations` | `{attribute, value, opId, clientTs, sentAt?}` → 201, or 200 with `duplicate: true` on a repeated opId. Returns the updated `evidence`. 409 `MISSION_NOT_ACTIVE` if the mission is not active/paused, including when a completion wins a race with it; a 201 observation is always in the report. 429 `OBSERVATION_LIMIT` past 40 per mission or 10 per attribute (`RULES.observationLimits`) |
 | `GET /missions/:id/observations` | |
+| `GET /missions/:id/steps/:n/speech` | ElevenLabs MP3 of step `n` of the caller's own mission. 404 `NOT_CONFIGURED` without a key, 503 if ElevenLabs fails; the client then uses the browser voice. Planning rate limit |
+| `GET /locations/:id/hourly?tz=` | Tiger Data reports at a place over the last 90 days by local hour of `tz` (IANA, default `UTC`) → `{available, timeZone, windowDays, hours[{hour, attribute, value, reports}]}`, or `{available: false, reason, hours: []}` when Tiger is off or failing |
 | `POST /missions/:id/observations/parse` | `{text}` → proposed observations `{proposals, method: ai\|keywords, ...}`. **Nothing is saved, and the text is not stored** |
 | `POST /sync` | `{ops: [{opId, missionId, clientTs, type, payload?}], sentAt?}` (≤ 50, applied in order; `sentAt` = the client's clock when it sent this request) → `{results: [{opId, status: applied\|duplicate\|conflict\|rejected\|retry, result?, error?}]}` |
 | `GET /history?page&limit` | Completed and cancelled missions with report summaries |
@@ -38,7 +40,7 @@ Codes: `VALIDATION_ERROR` 400, `INVALID_JSON` 400, `CLOCK_SKEW` 400 (only for re
 | `GET /analytics/overview` | Counts plus `completionRate` / `averageMinutes`, which are `null` until 5 samples, with `insufficientData`. `totalMinutesOutside` and `averageMinutes` use only reports with a trusted duration (0–240 min): `minutesSampleSize` of them, `minutesUserEstimated` of which are the user's own estimates rather than measured, `minutesExcluded` left out (`null` minutes, or over-cap values stored by older versions) |
 | `GET /analytics/attributes` | Per attribute: value counts, matched/differed counts, `expectationMatchRate` (`null` until 5 comparisons) |
 | `GET /me/export` | All of the caller's data as JSON (without internal owner IDs) |
-| `DELETE /me` | Deletes everything owned by the session and the session itself, then recomputes affected shared evidence |
+| `DELETE /me` | Deletes everything owned by the session and the session itself, then recomputes affected shared evidence. Also deletes the owner's Tiger Data rows and Backboard memory → `{deleted, evidenceRecomputed, tigerRowsDeleted, backboardMemoryDeleted}` |
 
 ## Sync semantics
 - Each op is applied at most once per `opId`, even when requests race. Repeating an `opId` returns `duplicate` with the original result (e.g. the same `reportId`).

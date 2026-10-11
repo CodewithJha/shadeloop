@@ -18,7 +18,9 @@ AI narration of reports is intentionally absent. It would add a model's wording 
 - State durations in text. A step's duration lives only in its `minutes` field, which the UI shows as "N min". The prompt and the step schema say so, and any title, description, objective or step text that states a duration (`RULES.durationPattern`: "10 minutes", "ten-minute", "half an hour", "a quarter hour", "30 seconds"…) is rejected, because shortened minutes would contradict it. If every AI candidate is rejected, templates are used and `fallbackReason` names the reason. Templates pass the same checks (tested for every type and several budgets).
 
 ## Mechanics (`server/src/ai.ts`)
-- Providers: Ollama `/api/chat` (JSON Schema passed as `format`) or OpenAI-compatible `/chat/completions` (`response_format: json_object`).
+- Providers: Ollama `/api/chat` (JSON Schema passed as `format`) or OpenAI-compatible `/chat/completions` (`response_format: json_object`). Production uses Gemma 4 (`gemma-4-26b-a4b-it`) on Google AI Studio's OpenAI-compatible endpoint; its replies start with a `<thought>` block, which `stripThought` removes before parsing.
+- Memory: for people who opt in, up to 3 of their own earlier requests (Backboard) are passed to the proposal task as `rememberedRequests`. The prompt says to respect stated needs in steps and wording but never claim a place meets them. The engine and evidence model don't read memory.
+- Tracing: with `SENTRY_DSN`, each task is an `invoke_agent` span with one `chat` span per attempt (token usage, no prompt text).
 - Every response is parsed with `JSON.parse` and validated with Zod. Malformed or invalid output is retried (`AI_MAX_RETRIES`, default 1, so 2 attempts), each with an `AI_TIMEOUT_MS` timeout.
 - On failure, callers get `data: null` with `fallbackReason` and use deterministic code: templates or keyword parsers.
 - Fallback reasons never echo model output (JSON syntax errors become "malformed JSON").

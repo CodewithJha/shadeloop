@@ -8,11 +8,13 @@ server/src/
   config.ts              env (Zod) + RULES (all business limits)
   domain.ts              pure rules: state machine, evidence model, condition checks, constraint engine
   fallback.ts            templates, keyword parsers, template report summary (no AI)
-  ai.ts                  providers (Ollama, OpenAI-compatible), aiJson() with validation/retry, tasks
-  providers.ts           Overpass, SerpApi, fixture discovery; Open-Meteo weather; bounded in-process cache, one retry, 429 back-off
+  instrument.ts          Sentry init, preloaded with `node --import`
+  ai.ts                  providers (Ollama, OpenAI-compatible e.g. Gemma 4 on AI Studio), aiJson() with validation/retry, tasks
+  providers.ts           Overpass, SerpApi, fixture discovery; Open-Meteo weather; bounded in-process cache, one retry, 429 back-off; Backboard memory; ElevenLabs speech
+  tiger.ts               Tiger Data mirror: hypertable, 15-minute continuous aggregate, time-of-day reads, owner deletes
   missions.ts            planning, transitions, observations, reports, evidence persistence, sync
-  account.ts             anonymous owners, preferences, analytics, export, delete
-  integrations.ts        last-call registry → integration statuses
+  account.ts             anonymous owners, preferences, analytics, export, delete (incl. Tiger rows and Backboard memory)
+  integrations.ts        last-call registry → integration statuses; Sentry span helpers
   openapi.ts             OpenAPI 3.1 generated from shared schemas
   db.ts                  Mongo connection, indexes, in-memory dev mode
 web/src/

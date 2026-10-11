@@ -26,21 +26,37 @@ flowchart LR
   end
   subgraph Server [Node + Express]
     API[REST /api/v1] --> Plan[Planner]
-    Plan --> AI[AI provider: Ollama or OpenAI-compatible]
+    Plan --> AI[AI: Gemma 4 on AI Studio, or Ollama]
     Plan --> FB[Deterministic templates]
     Plan --> Engine[Constraint engine]
     Plan --> Disc[Discovery: Overpass, SerpApi, fixture]
     Plan --> Wx[Open-Meteo]
+    Plan --> Mem[Backboard memory, opt-in]
     API --> Ev[Evidence model]
+    API --> TTS[ElevenLabs voice]
   end
-  API --> DB[(MongoDB)]
+  API --> DB[(MongoDB Atlas)]
+  API --> TS[(Tiger Data: observations by time of day)]
+  Server -.traces.-> Sentry[Sentry agent tracing]
 ```
+
+Every integration except MongoDB is optional and degrades to a labelled fallback. What each does, its env vars, failure mode and privacy behaviour: [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md).
+
+| Integration | Used for |
+|---|---|
+| Gemma 4 (`gemma-4-26b-a4b-it`) via Google AI Studio | Parsing requests and notes, proposing missions. The engine checks every proposal |
+| MongoDB Atlas | Source of truth for missions, observations, reports and evidence |
+| Sentry | Agent tracing: `invoke_agent`, `chat` (with token usage) and `execute_tool` spans for weather, discovery and memory |
+| ElevenLabs | Reads mission steps aloud (`eleven_flash_v2_5`), cached; browser voice offline |
+| Tiger Data (TimescaleDB) | Hypertable of place observations and a 15-minute continuous aggregate behind "Reports here by time of day" |
+| Backboard | Opt-in memory of your own past requests, used when planning |
+| OpenStreetMap Overpass, SerpApi, Open-Meteo | Places and weather (SerpApi is wired but not verified live) |
 
 The AI never writes to the database, decides safety, invents places or weather, or overrides the engine. See [docs/AI_POLICY.md](docs/AI_POLICY.md).
 
 ## Stack
 
-npm workspaces: `shared` (Zod schemas), `server` (Node ≥ 23.6 running TypeScript natively, Express 5, Zod, MongoDB driver, pino, helmet, express-rate-limit), `web` (React 19, Vite 8, vite-plugin-pwa, idb). Tests: Vitest, Supertest, mongodb-memory-server, fake-indexeddb.
+npm workspaces: `shared` (Zod schemas), `server` (Node ≥ 23.6 running TypeScript natively, Express 5, Zod, MongoDB driver, pg, @sentry/node, pino, helmet, express-rate-limit), `web` (React 19, Vite 8, vite-plugin-pwa, idb). Tests: Vitest, Supertest, mongodb-memory-server, fake-indexeddb.
 
 ## Setup
 
@@ -54,7 +70,9 @@ npm run dev                   # API on :8080, web on :5173 (proxies /api)
 
 The first run with `MONGODB_URI=memory` downloads a MongoDB binary (about 100 MB) through mongodb-memory-server. The in-memory database is empty on every server start: missions, observations and sessions are lost on restart (the browser then gets a new session automatically, and missions cached on the device show as "no longer exists on the server"). Without a `.env`, pass the variables inline, e.g. `MONGODB_URI=memory DISCOVERY_MODE=fixture npm run dev`.
 
-No variable needs a key or account: only `MONGODB_URI` is required. AI, SerpApi and the OpenAI-compatible provider are optional; Overpass and Open-Meteo are keyless public services.
+No variable needs a key or account: only `MONGODB_URI` is required. AI, SerpApi, Sentry, ElevenLabs, Tiger Data and Backboard are optional and off without their variable; Overpass and Open-Meteo are keyless public services.
+
+**Gemma 4 via Google AI Studio (optional, used in production):** `AI_PROVIDER=openai`, `OPENAI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai`, `OPENAI_MODEL=gemma-4-26b-a4b-it` and your AI Studio key in `OPENAI_API_KEY`.
 
 **Local MongoDB instead of memory (data survives restarts):** `docker run -d --name shadeloop-mongo -p 27017:27017 mongo:8`, then `MONGODB_URI=mongodb://localhost:27017`.
 
@@ -69,7 +87,7 @@ No variable needs a key or account: only `MONGODB_URI` is required. AI, SerpApi 
 **Troubleshooting**
 - `Invalid env MONGODB_URI: …` and exit 1: set `MONGODB_URI` (`memory` for dev). Production refuses `memory`.
 - `EADDRINUSE`: something already uses 8080 (API) or 5173 (Vite). Set `PORT` for the API; the Vite proxy in `web/vite.config.ts` expects the API on 8080.
-- AI shows `DEGRADED`: Ollama isn't running or the model isn't pulled (`ollama list`). Planning still works with templates and says so.
+- AI shows `DEGRADED`: Ollama isn't running or the model isn't pulled (`ollama list`), or the AI Studio key or model name is wrong. Planning still works with templates and says so.
 - No named places: live Overpass is often slow or returns 504; use `DISCOVERY_MODE=fixture` for demos (places are labelled as samples).
 - After pulling new code, an open PWA shows "A new version of ShadeLoop is ready" with a Reload button. It never reloads by itself, and the offer waits while Field Mode, the completion form or unsaved input is on screen.
 
@@ -84,11 +102,15 @@ No variable needs a key or account: only `MONGODB_URI` is required. AI, SerpApi 
 | `RATE_LIMIT_PER_MIN` | `120` | Per-IP budget. Planning, discovery and note parsing get 1/8 of it, session creation 1/6 |
 | `AI_PROVIDER` | `none` | `none`, `ollama` or `openai` |
 | `OLLAMA_URL` / `OLLAMA_MODEL` | `http://localhost:11434` / `gemma3:4b` | |
-| `OPENAI_BASE_URL` / `OPENAI_API_KEY` / `OPENAI_MODEL` | none | Any OpenAI-compatible chat-completions API |
+| `OPENAI_BASE_URL` / `OPENAI_API_KEY` / `OPENAI_MODEL` | none | Any OpenAI-compatible chat-completions API (production: Gemma 4 on Google AI Studio) |
 | `AI_TIMEOUT_MS` / `AI_MAX_RETRIES` | `60000` / `1` | Per attempt, and extra attempts after the first |
 | `DISCOVERY_MODE` | `live` | `live` (Overpass, plus SerpApi if a key is set) or `fixture` (labelled fake places) |
 | `SERPAPI_KEY` | none | Enables SerpApi Google Maps results |
 | `OVERPASS_URL` / `OPEN_METEO_URL` / `HTTP_TIMEOUT_MS` | public endpoints / `20000` | |
+| `SENTRY_DSN` | none | Enables Sentry agent tracing and error reports |
+| `ELEVENLABS_API_KEY` / `ELEVENLABS_VOICE_ID` | none / a stock voice | Enables the ElevenLabs step voice |
+| `TIGER_DATABASE_URL` | none | Tiger Data `postgres://` URL; enables the time-of-day mirror |
+| `BACKBOARD_API_KEY` | none | Enables opt-in request memory |
 
 ## Testing
 
@@ -96,16 +118,16 @@ No variable needs a key or account: only `MONGODB_URI` is required. AI, SerpApi 
 npm run lint && npm run typecheck && npm test && npm run build
 ```
 
-There are 117 server tests (unit and integration, including an end-to-end field-truth-loop test) and 38 web tests (offline queue, API client, and a production build check of the PWA manifest, icons and service worker). External services are mocked in tests; there are no automated browser tests. See [docs/TEST_PLAN.md](docs/TEST_PLAN.md).
+There are 121 server tests (unit and integration, including an end-to-end field-truth-loop test) and 38 web tests (offline queue, API client, and a production build check of the PWA manifest, icons and service worker). External services are mocked in tests; there are no automated browser tests. See [docs/TEST_PLAN.md](docs/TEST_PLAN.md).
 
 ## Deployment
 
-- **Render:** `render.yaml` defines one web service that serves the API and PWA on Node 24. Set `MONGODB_URI` (Atlas) in the dashboard. `TRUST_PROXY=1` assumes exactly one proxy hop in front of the app (rate limits use the client IP from `X-Forwarded-For`); this was not verified on Render.
-- **Docker:** `docker build -t shadeloop . && docker run -p 8080:8080 -e NODE_ENV=production -e MONGODB_URI=... shadeloop`. Two stages: the build stage installs everything and builds the PWA; the runtime stage (`node:24-alpine`, user `node`) installs only the server's production dependencies (`npm ci --omit=dev --workspace=server`) and copies `server/src`, `shared/src` and `web/dist`. No `.env` file is copied (`.dockerignore`). A `HEALTHCHECK` calls `/api/v1/health` with Node's `fetch` (no curl in the image). Built from a clean checkout and run against a `mongo:8` container on 2026-10-11 (271 MB). Not yet deployed to Render or Atlas.
+- **Render:** `render.yaml` defines one web service (Singapore region) that serves the API and PWA on Node 24, with Gemma 4 on AI Studio as the AI provider. Set the secrets in the dashboard: `MONGODB_URI` (Atlas), `OPENAI_API_KEY` (AI Studio), and optionally `SERPAPI_KEY`, `SENTRY_DSN`, `ELEVENLABS_API_KEY`, `TIGER_DATABASE_URL`, `BACKBOARD_API_KEY`. `TRUST_PROXY=1` assumes exactly one proxy hop in front of the app (rate limits use the client IP from `X-Forwarded-For`); this was not verified on Render.
+- **Docker:** `docker build -t shadeloop . && docker run -p 8080:8080 -e NODE_ENV=production -e MONGODB_URI=... shadeloop`. Two stages: the build stage installs everything and builds the PWA; the runtime stage (`node:24-alpine`, user `node`) installs only the server's production dependencies (`npm ci --omit=dev --workspace=server`) and copies `server/src`, `shared/src` and `web/dist`. No `.env` file is copied (`.dockerignore`). A `HEALTHCHECK` calls `/api/v1/health` with Node's `fetch` (no curl in the image). Built from a clean checkout and run against a `mongo:8` container on 2026-10-11 (271 MB).
 - **CI:** `.github/workflows/ci.yml` on Node 24 (the production target): lint, typecheck, tests, PWA build, `npm audit --omit=dev --audit-level=high`, and a Docker image build (never pushed). No credentials or paid APIs: tests mock every external call and use mongodb-memory-server, whose binary is cached between runs.
 
 ### Operations
-- **Startup:** invalid env exits 1 listing the field names (never values). Production refuses `MONGODB_URI=memory`. If MongoDB is unreachable or index creation fails, the process logs `startup failed: …` (hosts only) and exits 1. Optional integrations (AI, SerpApi) are never required.
+- **Startup:** invalid env exits 1 listing the field names (never values). Production refuses `MONGODB_URI=memory`. If MongoDB is unreachable or index creation fails, the process logs `startup failed: …` (hosts only) and exits 1. Optional integrations (AI, SerpApi, Sentry, ElevenLabs, Tiger Data, Backboard) are never required, and none of them is contacted at startup.
 - **Health:** `GET /api/v1/health` is liveness only (no DB or network call). `GET /api/v1/health/dependencies` pings MongoDB and reuses one AI probe for 60 s; place and weather statuses come from the last real call, so the public endpoint can't be used to drive provider traffic.
 - **Shutdown:** SIGTERM/SIGINT stop accepting connections, close the HTTP server and the Mongo client, log `shutdown complete` and exit 0; anything still open after 10 s is cut off with exit 1.
 - **Indexes:** created at every start, never dropped automatically. See docs/ARCHITECTURE.md → Indexes for the one obsolete index to drop by hand on databases created before 2026-10-11.
@@ -130,7 +152,10 @@ For a demo without network discovery, set `DISCOVERY_MODE=fixture`. Places are t
 - Nothing is verified. No verified accessibility source is integrated (OSM `wheelchair` tags are not used), so step-free access, seating and path condition always show as **unverified** with a "check access yourself" notice, even when reports agree. OpenStreetMap place data is labelled "map data".
 - Small local models (gemma3:4b) often overshoot time budgets. The engine shortens or rejects them, then falls back to templates. Durations live only in step minutes: AI text that states a duration ("10 minutes", "half an hour") is rejected, so it can't contradict shortened steps. The detector is a phrase list, so unusual wordings can slip through, and harmless ones ("take a minute") cause a template fallback. The "why it fits" line written by AI is not checked for durations.
 - The public Overpass API is sometimes slow or returns 504. Planning then proceeds without named places and says so.
-- English only. Voice uses browser APIs only (Web Speech), where supported.
+- English only. Dictation uses the browser's speech recognition. Steps are read by ElevenLabs when online and configured, otherwise by the browser voice.
+- The time-of-day panel (Tiger Data) only has observations recorded after it was configured, and its reports are as unverified as any other.
+- Backboard memory is deleted with "Delete my data", but turning the setting off only stops using it, and it isn't part of the data export.
+- SerpApi is wired but has not been verified against the live API.
 - Offline changes the server refuses (for example observations for a mission that expired or was cancelled elsewhere) can't be applied. They stay on the device, held per mission, until you download or discard them. There is no merge.
 - Device clocks are corrected per sync request from the time the device says it sent it, so a wrong clock no longer loses data. Corrected times can be late by the request latency, and changing the device clock between recording and syncing shifts those events (they are clamped between the previous event and now). Clients without `sentAt` keep the old 5-minute rule.
 - Durations: you can enter 0–240 minutes; a duration measured from timestamps that is negative or over 240 minutes (e.g. a mission left running for days) is shown as unknown and left out of your totals. Entered minutes are labelled as your estimate and the report shows the measured time next to them, but they aren't corrected or flagged when the two differ; totals use your estimate and say how many estimates they include.

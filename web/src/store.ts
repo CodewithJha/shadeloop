@@ -158,18 +158,28 @@ export async function retryOp(opId: string) {
   notify();
 }
 
+/** The request never got an HTTP response: offline, aborted or timed out. */
 export class NetworkError extends Error {}
+/** The server answered with an HTTP error. `code`/`requestId` come from its error envelope when it sent one. */
 export class ApiError extends Error {
   status: number;
   code: string;
-  constructor(status: number, code: string, message: string) {
+  requestId?: string;
+  /** Seconds, from `Retry-After`. */
+  retryAfter?: number;
+  constructor(status: number, code: string, message: string, requestId?: string, retryAfter?: number) {
     super(message);
     this.status = status;
     this.code = code;
+    this.requestId = requestId;
+    this.retryAfter = retryAfter;
   }
 }
+/** A 2xx response whose body isn't the expected JSON (e.g. a proxy page). The request may have been applied. */
+export class BadResponseError extends Error {}
 
-export const isRecoverable = (e: unknown) => e instanceof NetworkError || (e instanceof ApiError && (e.status >= 500 || e.status === 429));
+export const isRecoverable = (e: unknown) =>
+  e instanceof NetworkError || e instanceof BadResponseError || (e instanceof ApiError && (e.status >= 500 || e.status === 429));
 export const backoffMs = (attempts: number) => Math.min(1000 * 2 ** attempts, 5 * 60_000);
 const SYNCED_RETENTION_MS = 24 * 3_600_000;
 
@@ -222,9 +232,11 @@ async function doFlush(send: (ops: SyncOp[]) => Promise<SyncResult[]>, now: numb
     results = await send(due.map(wire));
   } catch (e) {
     const recoverable = isRecoverable(e);
+    const retryAfterMs = e instanceof ApiError && e.retryAfter ? e.retryAfter * 1000 : 0;
     for (const q of due) {
       const attempts = q.attempts + 1;
-      await d.put('ops', { ...q, state: recoverable ? 'failed' : 'conflict', attempts, nextAttemptAt: now + backoffMs(attempts), lastError: (e as Error).message });
+      const nextAttemptAt = now + Math.max(backoffMs(attempts), retryAfterMs);
+      await d.put('ops', { ...q, state: recoverable ? 'failed' : 'conflict', attempts, nextAttemptAt, lastError: (e as Error).message });
       if (!recoverable) refused.add(q.missionId);
     }
     return refused;

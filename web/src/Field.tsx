@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { ATTRIBUTES, type Attribute, type Preferences, type Report } from '@shadeloop/shared';
+import { ATTRIBUTES, MAX_ACTUAL_MINUTES, type Attribute, type Preferences, type Report } from '@shadeloop/shared';
 import { api } from './api.ts';
 import { enqueue, getCached, getMeta, subscribe, updateLocal, type CachedMission } from './store.ts';
 import { GoneNotice, go, label, useSync } from './App.tsx';
@@ -259,7 +259,7 @@ export function Completion({ id }: { id: string }) {
             </label>
           </fieldset>
           <label htmlFor="mins">Minutes spent (optional, otherwise measured from start/end)</label>
-          <input id="mins" type="number" min={0} max={600} value={minutes} onChange={(e) => setMinutes(e.target.value)} />
+          <input id="mins" type="number" min={0} max={MAX_ACTUAL_MINUTES} step={1} value={minutes} onChange={(e) => setMinutes(e.target.value)} />
           <label htmlFor="rating">Rating (optional)</label>
           <select id="rating" value={rating} onChange={(e) => setRating(e.target.value)}>
             <option value="">No rating</option>
@@ -301,7 +301,15 @@ export function Completion({ id }: { id: string }) {
           <tr>
             <th scope="row">Minutes</th>
             <td>{m.estimatedMinutes}</td>
-            <td>{report ? `${report.actual.minutes} (${report.actual.minutesSource === 'user' ? 'you entered' : 'from timestamps'})` : deviceMinutes !== null ? `~${deviceMinutes} (this device, includes pauses)` : 'unknown'}</td>
+            <td>
+              {report
+                ? report.actual.minutes === null
+                  ? 'unknown (start/end times were implausible)'
+                  : `${report.actual.minutes} (${report.actual.minutesSource === 'user' ? 'you entered' : 'from timestamps'})`
+                : deviceMinutes !== null
+                  ? `~${deviceMinutes} (this device, includes pauses)`
+                  : 'unknown'}
+            </td>
           </tr>
           <tr>
             <th scope="row">Steps</th>

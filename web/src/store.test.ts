@@ -62,6 +62,14 @@ describe('offline op queue', () => {
     expect((await listOps())[0]).toMatchObject({ state: 'conflict', lastError: 'bad batch' });
   });
 
+  it('waits at least as long as a 429 Retry-After asks', async () => {
+    await enqueue({ type: 'start', missionId: 'm1' });
+    await flush(async () => {
+      throw new ApiError(429, 'RATE_LIMITED', 'Too many requests, try again in 30 s', 'req-1', 30);
+    }, 0);
+    expect((await listOps())[0]).toMatchObject({ state: 'failed', nextAttemptAt: 30_000 });
+  });
+
   it('surfaces per-op conflicts without dropping them, and only the user can dismiss', async () => {
     const ok = await enqueue({ type: 'observation', missionId: 'm1', payload: { attribute: 'crowding', value: 'busy' } });
     const bad = await enqueue({ type: 'start', missionId: 'm1' });

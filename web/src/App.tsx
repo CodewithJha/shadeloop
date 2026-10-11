@@ -541,7 +541,10 @@ function History() {
             <dt>Observations recorded</dt>
             <dd>{overview.observations}</dd>
             <dt>Minutes outside (from reports)</dt>
-            <dd>{overview.totalMinutesOutside}</dd>
+            <dd>
+              {overview.totalMinutesOutside}
+              {overview.minutesExcluded > 0 && <span className="meta"> ({overview.minutesExcluded} without a reliable duration not counted)</span>}
+            </dd>
             <dt>Completion rate</dt>
             <dd>{overview.completionRate === null ? `needs ${overview.minSamples} started missions (have ${overview.sampleSize})` : `${Math.round(overview.completionRate * 100)}%`}</dd>
           </dl>

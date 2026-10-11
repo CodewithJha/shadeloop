@@ -1,0 +1,622 @@
+/** Mission workflow: plan → start → observe → complete → report → evidence, plus idempotent sync. */
+import { randomUUID } from 'node:crypto';
+import type { z } from 'zod';
+import {
+  ATTRIBUTES,
+  type Attribute,
+  type CompletePayload,
+  type ConditionCheck,
+  type EvidenceView,
+  type LocationView,
+  type Mission,
+  type MissionAction,
+  type PlanRequest,
+  type Report,
+  type SyncOp,
+  type SyncResult,
+  type WeatherView,
+} from '@shadeloop/shared';
+import { RULES } from './config.ts';
+import { col, isDuplicateKey } from './db.ts';
+import {
+  compareObservation,
+  fitDurations,
+  isEvidenceAttribute,
+  mergeConditions,
+  nextStatus,
+  rankLocations,
+  summarizeEvidence,
+  travelFor,
+  validateCandidate,
+  type EvidenceSummary,
+  type PlanContext,
+  type ValidatedCandidate,
+} from './domain.ts';
+import { AppError, notFound } from './errors.ts';
+import { aiParseRequest, aiProposeMissions, aiSummarize, type AiMeta } from './ai.ts';
+import { buildTemplate, keywordConstraints, relatedTypes, templateSummary } from './fallback.ts';
+import { discover, getWeather, loadLocations, type DiscoveryResult } from './providers.ts';
+import { getPrefs } from './account.ts';
+import { log } from './log.ts';
+
+export type MissionDoc = Omit<Mission, 'id'> & { _id: string; ownerId: string; planId: string; updatedAt: string; expireAt?: Date; appliedOpIds: string[] };
+type ReportDoc = Omit<Report, 'id'> & { _id: string; ownerId: string };
+export type ObservationDoc = {
+  _id: string;
+  opId: string;
+  ownerId: string;
+  missionId: string;
+  sessionId: string | null;
+  attribute: Attribute;
+  value: string;
+  sourceType: 'user_report';
+  clientTs: string;
+  serverTs: string;
+  locationId: string | null;
+  verificationStatus: 'unverified';
+  privacy: 'location_linked' | 'mission_only';
+};
+type EvidenceDoc = EvidenceSummary & { locationId: string; updatedAt: Date };
+
+const missions = () => col<MissionDoc>('missions');
+const observations = () => col<ObservationDoc>('observations');
+const reports = () => col<ReportDoc>('reports');
+const evidenceCol = () => col<EvidenceDoc>('evidence');
+
+export function missionView(d: MissionDoc): Mission {
+  const { _id, ownerId: _o, planId: _p, updatedAt: _u, expireAt: _e, appliedOpIds: _a, ...rest } = d;
+  return { id: _id, ...rest };
+}
+
+export function reportView(d: ReportDoc): Report {
+  const { _id, ownerId: _o, ...rest } = d;
+  return { id: _id, ...rest };
+}
+
+function evidenceView(d: EvidenceDoc): EvidenceView {
+  return {
+    locationId: d.locationId,
+    attribute: d.attribute,
+    estimate: d.estimate,
+    confidence: d.confidence,
+    supporting: d.supporting,
+    contradicting: d.contradicting,
+    valueCounts: d.valueCounts,
+    lastObservedAt: d.lastObservedAt?.toISOString() ?? null,
+    expiresAt: d.expiresAt?.toISOString() ?? null,
+    sourceType: 'aggregated',
+    sources: d.sources,
+  };
+}
+
+/* ---------------- Evidence ---------------- */
+
+// ponytail: concurrent writes to the same (location, attribute) can briefly leave a summary one report behind; the next write or read-time re-evaluation fixes it. Use a per-key queue if that matters.
+export async function recomputeEvidence(locationId: string, attribute: Attribute): Promise<EvidenceView | null> {
+  if (!isEvidenceAttribute(attribute)) return null;
+  const obs = await observations()
+    .find({ locationId, attribute }, { projection: { ownerId: 1, value: 1, clientTs: 1 } })
+    .sort({ clientTs: -1 })
+    .limit(RULES.evidence.maxReportsConsidered)
+    .toArray();
+  if (!obs.length) {
+    await evidenceCol().deleteOne({ locationId, attribute });
+    return null;
+  }
+  const summary = summarizeEvidence(
+    attribute,
+    obs.map((o) => ({ ownerId: o.ownerId, value: o.value, observedAt: new Date(o.clientTs) })),
+  );
+  const doc = { ...summary, locationId, updatedAt: new Date() };
+  await evidenceCol().updateOne({ locationId, attribute }, { $set: doc }, { upsert: true });
+  return evidenceView(doc);
+}
+
+export async function loadEvidence(locationIds: string[]): Promise<Map<string, Map<Attribute, EvidenceView>>> {
+  const out = new Map<string, Map<Attribute, EvidenceView>>();
+  if (!locationIds.length) return out;
+  const now = new Date();
+  for (const d of await evidenceCol().find({ locationId: { $in: locationIds } }).toArray()) {
+    const view = d.reevaluateAt && d.reevaluateAt <= now ? await recomputeEvidence(d.locationId, d.attribute) : evidenceView(d);
+    if (!view) continue;
+    if (!out.has(d.locationId)) out.set(d.locationId, new Map());
+    out.get(d.locationId)!.set(d.attribute, view);
+  }
+  return out;
+}
+
+/* ---------------- Planning ---------------- */
+
+const CHECK_TEXT: Record<ConditionCheck['status'], string> = {
+  supported: 'supported by several independent field reports',
+  weak_support: 'one or two reports suggest yes (low confidence)',
+  weak_against: 'one or two reports suggest no (low confidence)',
+  contradicted: 'field reports say no',
+  conflicting: 'field reports disagree',
+  stale: 'reports are too old to rely on',
+  unknown: 'no field reports yet, so this is unverified',
+};
+
+function safetyNotes(weather: WeatherView | null): string[] {
+  const notes: string[] = [...RULES.baseSafetyNotes];
+  if (weather?.available) {
+    const at = `at ${weather.observedAt} (Open-Meteo)`;
+    if (weather.apparentTemperatureC! >= RULES.heatApparentC) notes.push(`It feels hot: ${weather.apparentTemperatureC}°C apparent ${at}. Prefer shade and carry water.`);
+    if (weather.apparentTemperatureC! <= RULES.coldApparentC) notes.push(`It feels cold: ${weather.apparentTemperatureC}°C apparent ${at}. Dress warmly.`);
+    if (weather.precipitationMm! >= RULES.rainMm) notes.push(`Precipitation was reported ${at}.`);
+  }
+  return notes;
+}
+
+export async function planMissions(ownerId: string, input: PlanRequest) {
+  const prefs = await getPrefs(ownerId);
+
+  let parse: (AiMeta & { method: 'ai' | 'keywords' }) | null = null;
+  let parsed: Partial<ReturnType<typeof keywordConstraints>> = {};
+  if (input.prompt) {
+    const ai = await aiParseRequest(input.prompt);
+    parsed = ai.data ?? keywordConstraints(input.prompt);
+    parse = { ...ai.meta, method: ai.data ? 'ai' : 'keywords' };
+  }
+  const missionType = input.missionType ?? parsed.missionType ?? prefs.missionTypes[0] ?? 'quiet_break';
+  const availableMinutes = input.availableMinutes ?? parsed.availableMinutes ?? prefs.defaultMinutes;
+  const { required, preferred } = mergeConditions(prefs, { required: input.required, preferred: input.preferred }, parsed);
+
+  const origin = input.coarseLocation;
+  let locations: LocationView[] = [];
+  let discovery: DiscoveryResult | null = null;
+  if (input.locationIds?.length) locations = await loadLocations(input.locationIds, origin);
+  else if (origin) {
+    discovery = await discover(origin);
+    locations = discovery.locations;
+  }
+  locations = locations
+    .filter((l) => l.category !== 'bench')
+    .concat(locations.filter((l) => l.category === 'bench'))
+    .slice(0, RULES.maxDiscoveredLocations);
+  const weather = origin ? await getWeather(origin) : null;
+  const evidence = await loadEvidence(locations.map((l) => l.id));
+  const ctx: PlanContext = { availableMinutes, prefs, required, preferred, locations: new Map(locations.map((l) => [l.id, l])), evidence };
+  const typeOrder = input.missionType ? [missionType] : [missionType, ...relatedTypes(missionType)];
+  const maxMinutes = Math.min(availableMinutes, RULES.maxMissionMinutes);
+
+  const ai = await aiProposeMissions({
+    request: input.prompt,
+    missionType: input.missionType ? missionType : `${missionType} (or related: ${relatedTypes(missionType).join(', ')})`,
+    availableMinutes: maxMinutes,
+    maxWalkMinutes: prefs.maxWalkMinutes,
+    timeOfDay: prefs.timeOfDay,
+    required,
+    preferred,
+    locations: [
+      { id: 'null', name: 'no specific place', category: 'none', maxStepMinutes: maxMinutes, evidence: {} },
+      ...locations.map((l) => ({
+        id: l.id,
+        name: l.name,
+        category: l.category,
+        maxStepMinutes: maxMinutes - (travelFor(l, prefs)?.minutesRoundTrip ?? 0),
+        evidence: Object.fromEntries([...(evidence.get(l.id)?.values() ?? [])].map((e) => [e.attribute, `${e.estimate ?? 'none'} (${e.confidence})`])),
+      })),
+    ],
+    weather: weather?.available ? `${weather.temperatureC}°C, feels ${weather.apparentTemperatureC}°C, precipitation ${weather.precipitationMm} mm` : 'unknown',
+  });
+  const rejected: string[] = [];
+  let accepted: (ValidatedCandidate & { aiText?: string })[] = [];
+  for (const c of ai.data?.missions ?? []) {
+    const locationId = c.locationId === 'null' ? null : c.locationId;
+    const loc = locationId ? ctx.locations.get(locationId) ?? null : null;
+    const raw = { ...c, locationId };
+    const candidate = fitDurations(raw, maxMinutes - (travelFor(loc, prefs)?.minutesRoundTrip ?? 0)) ?? raw;
+    const v = validateCandidate(candidate, ctx);
+    if (!v.ok) rejected.push(`"${c.title}": ${v.errors.join('; ')}`);
+    else if (input.missionType && v.candidate.type !== missionType) rejected.push(`"${c.title}": wrong mission type`);
+    else {
+      if (candidate !== raw) v.uncertainty.push('Step durations were shortened by the constraint engine to fit your time.');
+      accepted.push({ ...v, aiText: c.whyItMatches });
+    }
+  }
+  if (rejected.length) log.info({ rejected: rejected.length }, 'AI candidates rejected by constraint engine');
+
+  const usedAi = accepted.length > 0;
+  const fallbackReason = usedAi ? null : (ai.meta.fallbackReason ?? `all AI candidates failed constraints: ${rejected.join(' | ')}`.slice(0, 500));
+  if (!usedAi) {
+    const ranked = rankLocations(ctx);
+    const used = new Set<string>();
+    for (const type of typeOrder.slice(0, RULES.maxCandidates)) {
+      const options = [...ranked.filter((l) => !used.has(l.id)), ...ranked.filter((l) => used.has(l.id)), null];
+      for (const loc of options) {
+        const travel = travelFor(loc, prefs)?.minutesRoundTrip ?? 0;
+        const c = buildTemplate(type, maxMinutes - travel, prefs.maxWalkMinutes - travel, loc);
+        const v = c && validateCandidate(c, ctx);
+        if (v?.ok) {
+          accepted.push(v);
+          if (loc) used.add(loc.id);
+          break;
+        }
+      }
+    }
+  }
+  accepted = accepted.slice(0, RULES.maxCandidates);
+  if (!accepted.length) {
+    throw new AppError(422, 'NO_FEASIBLE_MISSION', 'No mission fits these constraints. Try more time or relax walking limits.', { rejected });
+  }
+
+  const now = new Date();
+  const planId = randomUUID();
+  const provenance = {
+    generator: usedAi ? ('ai' as const) : ('template' as const),
+    provider: ai.meta.provider,
+    model: ai.meta.model,
+    fallbackUsed: !usedAi,
+    fallbackReason,
+  };
+  const docs: MissionDoc[] = accepted.map((v) => ({
+    _id: randomUUID(),
+    ownerId,
+    planId,
+    title: v.candidate.title,
+    description: v.candidate.description,
+    type: v.candidate.type,
+    objective: v.candidate.objective,
+    availableMinutes,
+    estimatedMinutes: v.estimatedMinutes,
+    walkingMinutes: v.walkingMinutes,
+    constraints: { required, preferred },
+    conditionChecks: v.conditionChecks,
+    candidateLocations: locations,
+    selectedLocation: v.location,
+    travel: v.travel,
+    route: null,
+    steps: v.candidate.steps,
+    observationPrompts: v.candidate.observationPrompts,
+    safetyNotes: safetyNotes(weather),
+    expectations: v.expectations,
+    weather,
+    whyItMatches: [
+      ...(v.aiText ? [{ text: v.aiText, sourceType: 'ai_suggestion' as const }] : [{ text: v.candidate.whyItMatches, sourceType: 'inferred' as const }]),
+      { text: `Estimated ${v.estimatedMinutes} min fits your ${availableMinutes} min.`, sourceType: 'inferred' as const },
+      ...v.conditionChecks.map((c) => ({
+        text: `${c.condition.replace('_', ' ')} (${c.required ? 'required' : 'preferred'}): ${CHECK_TEXT[c.status]}.`,
+        sourceType: c.status === 'unknown' ? ('inferred' as const) : ('aggregated' as const),
+      })),
+      ...(v.location && !v.location.isFixture
+        ? [{ text: `${v.location.name} is mapped as a ${v.location.category} (${v.location.attribution}).`, sourceType: 'verified_external' as const }]
+        : []),
+    ],
+    provenance,
+    uncertainty: [
+      ...v.uncertainty,
+      ...(weather === null ? ['No location shared, so weather was not checked.'] : weather.available ? [] : ['Weather is unavailable. Check conditions yourself.']),
+      ...(v.location?.isFixture ? ['This place is a sample fixture for demos, not a real location.'] : []),
+    ],
+    status: 'planned',
+    session: {
+      id: null,
+      startedAt: null,
+      pausedAt: null,
+      totalPausedMs: 0,
+      completedAt: null,
+      cancelledAt: null,
+      currentStep: 0,
+      completionStatus: null,
+      userMinutes: null,
+      lastEventAt: null,
+    },
+    reportId: null,
+    createdAt: now.toISOString(),
+    updatedAt: now.toISOString(),
+    version: 1,
+    expireAt: new Date(now.getTime() + RULES.plannedMissionTtlDays * 86_400_000),
+    appliedOpIds: [],
+  }));
+  await missions().insertMany(docs);
+
+  return {
+    planId,
+    missions: docs.map(missionView),
+    planning: {
+      constraints: { missionType, availableMinutes, required, preferred },
+      parse,
+      generation: { ...provenance, attempts: ai.meta.attempts, rejectedCandidates: rejected },
+      weather,
+      discovery: discovery && { mode: discovery.mode, sources: discovery.sources, limitations: discovery.limitations },
+    },
+  };
+}
+
+/* ---------------- Reads ---------------- */
+
+export async function getMission(ownerId: string, id: string) {
+  const d = await missions().findOne({ _id: id, ownerId });
+  if (!d) throw notFound('Mission');
+  return d;
+}
+
+// ponytail: skip/limit pagination degrades on deep pages; switch to an (updatedAt, _id) cursor if histories get long.
+export async function listMissions(ownerId: string, filter: { status?: string[] }, page: number, limit: number) {
+  const q = { ownerId, ...(filter.status ? { status: { $in: filter.status as Mission['status'][] } } : {}) };
+  const [items, total] = await Promise.all([
+    missions().find(q).sort({ updatedAt: -1 }).skip((page - 1) * limit).limit(limit).toArray(),
+    missions().countDocuments(q),
+  ]);
+  return { items: items.map(missionView), page, limit, total };
+}
+
+export async function history(ownerId: string, page: number, limit: number) {
+  const list = await listMissions(ownerId, { status: ['completed', 'cancelled'] }, page, limit);
+  const reps = await reports()
+    .find({ ownerId, missionId: { $in: list.items.map((m) => m.id) } }, { projection: { missionId: 1, summary: 1, actual: 1, comparisons: 1 } })
+    .toArray();
+  const byMission = new Map(reps.map((r) => [r.missionId, r]));
+  return {
+    ...list,
+    items: list.items.map((m) => {
+      const r = byMission.get(m.id);
+      return {
+        mission: m,
+        report: r ? { id: r._id, summary: r.summary.text, actualMinutes: r.actual.minutes, observations: r.actual.observations.length, comparisons: r.comparisons } : null,
+      };
+    }),
+  };
+}
+
+export async function getReport(ownerId: string, id: string) {
+  const r = await reports().findOne({ _id: id, ownerId });
+  if (!r) throw notFound('Report');
+  return reportView(r);
+}
+
+export async function listObservations(ownerId: string, missionId: string) {
+  await getMission(ownerId, missionId);
+  const items = await observations().find({ ownerId, missionId }).sort({ clientTs: 1 }).toArray();
+  return items.map(({ ownerId: _o, _id, ...o }) => ({ id: _id, ...o }));
+}
+
+/* ---------------- Transitions ---------------- */
+
+/** Validate a client timestamp: reject the future (beyond skew), clamp so events never precede the previous one. */
+function eventTime(clientTs: string | undefined, floorIso: string): string {
+  const now = Date.now();
+  const t = clientTs ? Date.parse(clientTs) : now;
+  if (t > now + RULES.clockSkewMs) throw new AppError(400, 'CLOCK_SKEW', 'clientTs is in the future');
+  return new Date(Math.max(t, Date.parse(floorIso))).toISOString();
+}
+
+type CompleteInput = z.infer<typeof CompletePayload>;
+
+export async function transition(
+  ownerId: string,
+  id: string,
+  action: MissionAction,
+  opts: { clientTs?: string; opId?: string; currentStep?: number; complete?: Partial<CompleteInput> } = {},
+) {
+  const m = await getMission(ownerId, id);
+  if (opts.opId && m.appliedOpIds.includes(opts.opId)) return { mission: missionView(m), reportId: m.reportId, alreadyApplied: true };
+  const to = nextStatus(m.status, action);
+  if (!to) throw new AppError(409, 'INVALID_TRANSITION', `Cannot ${action} a mission that is ${m.status}`, { currentStatus: m.status, action });
+
+  const ts = eventTime(opts.clientTs, m.session.lastEventAt ?? m.createdAt);
+  const s = { ...m.session, lastEventAt: ts };
+  const closePause = () => {
+    if (s.pausedAt) s.totalPausedMs += Date.parse(ts) - Date.parse(s.pausedAt);
+    s.pausedAt = null;
+  };
+  if (action === 'start') {
+    s.id = randomUUID();
+    s.startedAt = ts;
+  } else if (action === 'pause') s.pausedAt = ts;
+  else if (action === 'resume') closePause();
+  else if (action === 'cancel') {
+    closePause();
+    s.cancelledAt = ts;
+  } else {
+    closePause();
+    s.completedAt = ts;
+    s.completionStatus = opts.complete?.completionStatus ?? 'completed';
+    s.userMinutes = opts.complete?.actualMinutes ?? null;
+  }
+  const step = opts.currentStep ?? opts.complete?.currentStep;
+  if (step !== undefined) s.currentStep = Math.min(step, m.steps.length - 1);
+
+  let report: ReportDoc | null = null;
+  if (action === 'complete') {
+    report = await buildReport(m, s, opts.complete ?? {});
+    try {
+      await reports().insertOne(report);
+    } catch (e) {
+      if (isDuplicateKey(e)) throw new AppError(409, 'CONFLICT', 'Mission already has a report');
+      throw e;
+    }
+  }
+  const updated = await missions().findOneAndUpdate(
+    { _id: id, ownerId, version: m.version },
+    {
+      $set: { status: to, session: s, updatedAt: new Date().toISOString(), ...(report ? { reportId: report._id } : {}) },
+      $inc: { version: 1 },
+      ...(opts.opId ? { $push: { appliedOpIds: { $each: [opts.opId], $slice: -100 } } } : {}),
+      ...(action === 'start' ? { $unset: { expireAt: '' } } : {}),
+    },
+    { returnDocument: 'after' },
+  );
+  if (!updated) {
+    if (report) await reports().deleteOne({ _id: report._id });
+    throw new AppError(409, 'CONFLICT', 'Mission changed at the same time. Reload and retry.');
+  }
+  return { mission: missionView(updated), reportId: updated.reportId, alreadyApplied: false };
+}
+
+async function buildReport(m: MissionDoc, s: MissionDoc['session'], input: Partial<CompleteInput>): Promise<ReportDoc> {
+  const obs = await observations().find({ ownerId: m.ownerId, missionId: m._id }).sort({ clientTs: 1 }).toArray();
+  const latest = new Map<Attribute, string>();
+  for (const o of obs) latest.set(o.attribute, o.value);
+  const comparisons = [...latest].map(([attribute, observed]) => {
+    // temperature_feel is already relative to what the user expected.
+    const exp = attribute === 'temperature_feel' ? { estimate: 'as_expected', confidence: null } : m.expectations.find((e) => e.attribute === attribute);
+    const expected = exp && (exp.confidence === null || exp.confidence === 'low' || exp.confidence === 'moderate') ? exp.estimate : null;
+    return {
+      attribute,
+      expected,
+      expectedConfidence: attribute === 'temperature_feel' ? null : (exp?.confidence ?? 'unknown'),
+      observed,
+      result: compareObservation(ATTRIBUTES[attribute], expected, observed),
+    } as Report['comparisons'][number];
+  });
+  const computed = Math.max(0, Math.round((Date.parse(s.completedAt!) - Date.parse(s.startedAt!) - s.totalPausedMs) / 60_000));
+  const actualMinutes = s.userMinutes ?? computed;
+  const completionStatus = s.completionStatus ?? 'completed';
+  const facts = {
+    title: m.title,
+    type: m.type,
+    completionStatus,
+    plannedMinutes: m.estimatedMinutes,
+    actualMinutes,
+    stepsReached: s.currentStep + 1,
+    stepCount: m.steps.length,
+    comparisons: comparisons.map(({ attribute, expected, observed, result }) => ({ attribute, expected, observed, result })),
+  };
+  const ai = await aiSummarize(facts);
+  const locationId = m.selectedLocation?.id;
+  const evidenceRefs = locationId
+    ? (await evidenceCol().find({ locationId, attribute: { $in: [...latest.keys()] } }).toArray()).map(evidenceView)
+    : [];
+  return {
+    _id: randomUUID(),
+    ownerId: m.ownerId,
+    missionId: m._id,
+    createdAt: new Date().toISOString(),
+    completionStatus,
+    planned: {
+      title: m.title,
+      estimatedMinutes: m.estimatedMinutes,
+      availableMinutes: m.availableMinutes,
+      stepCount: m.steps.length,
+      location: m.selectedLocation?.name ?? null,
+      expectations: m.expectations,
+    },
+    actual: {
+      minutes: actualMinutes,
+      minutesSource: s.userMinutes !== null ? 'user' : 'timestamps',
+      stepsReached: s.currentStep + 1,
+      observations: obs.map((o) => ({ attribute: o.attribute, value: o.value, observedAt: o.clientTs })),
+    },
+    comparisons,
+    feedback: { rating: input.rating ?? null, text: input.feedback ?? null },
+    summary: {
+      text: ai.data?.summary ?? templateSummary({ ...facts, observationCount: obs.length }),
+      generator: ai.data ? 'ai' : 'template',
+      provider: ai.meta.provider,
+      model: ai.meta.model,
+      fallbackUsed: !ai.data,
+      fallbackReason: ai.meta.fallbackReason,
+    },
+    evidenceRefs,
+  };
+}
+
+/* ---------------- Observations ---------------- */
+
+export async function addObservation(ownerId: string, missionId: string, input: { attribute: Attribute; value: string; opId: string; clientTs: string }) {
+  const m = await getMission(ownerId, missionId);
+  if (m.status !== 'active' && m.status !== 'paused') {
+    throw new AppError(409, 'MISSION_NOT_ACTIVE', `Observations need an active or paused mission (currently ${m.status})`, { currentStatus: m.status });
+  }
+  const locationId = m.selectedLocation?.id ?? null;
+  const doc: ObservationDoc = {
+    _id: randomUUID(),
+    opId: input.opId,
+    ownerId,
+    missionId,
+    sessionId: m.session.id,
+    attribute: input.attribute,
+    value: input.value,
+    sourceType: 'user_report',
+    clientTs: eventTime(input.clientTs, m.session.startedAt ?? m.createdAt),
+    serverTs: new Date().toISOString(),
+    locationId,
+    verificationStatus: 'unverified',
+    privacy: locationId ? 'location_linked' : 'mission_only',
+  };
+  try {
+    await observations().insertOne(doc);
+  } catch (e) {
+    if (!isDuplicateKey(e)) throw e;
+    const prior = await observations().findOne({ opId: input.opId });
+    if (!prior || prior.ownerId !== ownerId) throw new AppError(409, 'OPID_CONFLICT', 'opId already used');
+    return { observation: prior, duplicate: true, evidence: null };
+  }
+  const evidence = locationId ? await recomputeEvidence(locationId, input.attribute) : null;
+  return { observation: doc, duplicate: false, evidence };
+}
+
+/* ---------------- Sync ---------------- */
+
+type SyncRecord = {
+  opId: string;
+  ownerId: string;
+  entityType: 'mission' | 'observation';
+  entityId: string;
+  opType: SyncOp['type'];
+  clientTs: string;
+  serverTs: Date;
+  status: SyncResult['status'];
+  result?: Record<string, unknown>;
+  error?: SyncResult['error'];
+};
+
+async function applyOp(ownerId: string, op: SyncOp): Promise<Omit<SyncResult, 'opId' | 'result'> & { result?: Record<string, unknown> }> {
+  try {
+    if (op.type === 'observation') {
+      const r = await addObservation(ownerId, op.missionId, { ...op.payload, opId: op.opId, clientTs: op.clientTs });
+      return { status: 'applied', result: { observationId: r.observation._id } };
+    }
+    const r = await transition(ownerId, op.missionId, op.type, {
+      clientTs: op.clientTs,
+      opId: op.opId,
+      currentStep: op.payload?.currentStep,
+      complete: op.type === 'complete' ? op.payload : undefined,
+    });
+    return { status: 'applied', result: { missionStatus: r.mission.status, version: r.mission.version, reportId: r.reportId } };
+  } catch (e) {
+    if (!(e instanceof AppError) || e.status >= 500) throw e;
+    return { status: e.status === 409 ? 'conflict' : 'rejected', error: { code: e.code, message: e.message, details: e.details } };
+  }
+}
+
+/** Apply ops in order. Repeated opIds return the stored result. Server errors abort the batch so the client retries; already-applied ops then come back as duplicates. */
+export async function sync(ownerId: string, ops: SyncOp[]): Promise<SyncResult[]> {
+  const results: SyncResult[] = [];
+  const recs = col<SyncRecord>('sync_records');
+  const asDuplicate = (prior: SyncRecord): SyncResult =>
+    prior.ownerId === ownerId
+      ? { opId: prior.opId, status: 'duplicate', result: { originalStatus: prior.status, ...prior.result }, ...(prior.error ? { error: prior.error } : {}) }
+      : { opId: prior.opId, status: 'rejected', error: { code: 'OPID_CONFLICT', message: 'opId already used' } };
+  for (const op of ops) {
+    const prior = await recs.findOne({ opId: op.opId });
+    if (prior) {
+      results.push(asDuplicate(prior));
+      continue;
+    }
+    const res = await applyOp(ownerId, op);
+    const record: SyncRecord = {
+      opId: op.opId,
+      ownerId,
+      entityType: op.type === 'observation' ? 'observation' : 'mission',
+      entityId: op.missionId,
+      opType: op.type,
+      clientTs: op.clientTs,
+      serverTs: new Date(),
+      status: res.status,
+      ...(res.result ? { result: res.result } : {}),
+      ...(res.error ? { error: res.error } : {}),
+    };
+    try {
+      await recs.insertOne(record);
+    } catch (e) {
+      if (!isDuplicateKey(e)) throw e;
+      results.push(asDuplicate((await recs.findOne({ opId: op.opId }))!));
+      continue;
+    }
+    results.push({ opId: op.opId, ...res });
+  }
+  return results;
+}

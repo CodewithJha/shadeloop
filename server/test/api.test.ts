@@ -252,6 +252,15 @@ describe('mission lifecycle', () => {
     await go('cancel').expect(409);
     await go('explode').expect(404);
   });
+  it('keeps a mission cancelled before it started (no TTL), so it stays in history', async () => {
+    const h = await session();
+    const [m] = (await plan(h)).missions;
+    expect((await col('missions').findOne({ _id: m.id as never }))?.expireAt).toBeInstanceOf(Date);
+    await request(app).post(`${api}/missions/${m.id}/cancel`).set(h).send({}).expect(200);
+    expect((await col('missions').findOne({ _id: m.id as never }))?.expireAt).toBeUndefined();
+    const hist = await request(app).get(`${api}/history`).set(h).expect(200);
+    expect(hist.body.items.map((i: { mission: Mission }) => i.mission.id)).toContain(m.id);
+  });
   it('validates observations and makes them idempotent by opId', async () => {
     const h = await session();
     const [m] = (await plan(h)).missions;

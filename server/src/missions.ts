@@ -486,7 +486,8 @@ export async function transition(
       $set: { status: to, session: s, updatedAt: new Date().toISOString(), ...completion },
       $inc: { version: 1 },
       ...(opts.opId ? { $push: { appliedOpIds: { $each: [opts.opId], $slice: -100 } } } : {}),
-      ...(action === 'start' ? { $unset: { expireAt: '' } } : {}),
+      // Only untouched planned missions expire; a cancelled one is history.
+      ...(action === 'start' || action === 'cancel' ? { $unset: { expireAt: '' } } : {}),
     },
     { returnDocument: 'after' },
   );

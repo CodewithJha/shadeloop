@@ -81,7 +81,7 @@ The first run with `MONGODB_URI=memory` downloads a MongoDB binary (about 100 MB
 npm run lint && npm run typecheck && npm test && npm run build
 ```
 
-There are 49 server tests (unit and integration, including an end-to-end field-truth-loop test) and 6 web queue tests. External services are mocked in tests. See [docs/TEST_PLAN.md](docs/TEST_PLAN.md).
+There are 63 server tests (unit and integration, including an end-to-end field-truth-loop test) and 21 web queue tests. External services are mocked in tests. See [docs/TEST_PLAN.md](docs/TEST_PLAN.md).
 
 ## Deployment
 
@@ -107,6 +107,7 @@ For a demo without network discovery, set `DISCOVERY_MODE=fixture`. Places are t
 - Small local models (gemma3:4b) often overshoot time budgets. The engine shortens or rejects them, then falls back to templates. AI step text may still mention the original duration after the engine shortened it. The comparison table and step durations are the deterministic source of truth.
 - The public Overpass API is sometimes slow or returns 504. Planning then proceeds without named places and says so.
 - English only. Voice uses browser APIs only (Web Speech), where supported.
+- Offline changes the server refuses (for example observations for a mission that expired or was cancelled elsewhere) can't be applied. They stay on the device, held per mission, until you download or discard them. There is no merge.
 - The repo lives at `~/ShadeLoop` (see docs/DECISIONS.md, item 0).
 
 ## License

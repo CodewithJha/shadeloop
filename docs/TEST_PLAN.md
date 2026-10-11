@@ -22,6 +22,7 @@ Run everything: `npm run lint && npm run typecheck && npm test && npm run build`
 
 ## Web unit tests (`web/src/store.test.ts`, fake-indexeddb)
 Queue persistence across reload, ordering, unique opIds, synced plus reportId hand-off, network backoff timing, 5xx recoverable vs 4xx conflict, per-op conflict surfaced and only removed by dismissal, stuck `syncing` reset.
+Per-mission ordering: an observation never overtakes a `start` that is backing off (503, 429, timeout, `retry`, missing result), the pair resumes in order once due, other missions aren't held, a mid-batch `retry` resumes in order. Same-opId resend after a lost response (no duplicate local observation); stored refusal returned as `duplicate` stays a conflict. No concurrent flush within a tab or while another tab holds the Web Lock. `syncing` op recovered after a reload. Reconciliation: server state adopted when nothing is queued, local kept while ops are queued, refetch after a refusal, 404 → mission `gone`, no further sends, ops kept and serialisable for export.
 
 ## Manual (performed 2026-10-11, Chromium via Cursor browser, 390×844 emulation)
 Settings location opt-in (emulated geolocation, rounded) → Discover with Ollama/gemma3:4b live → Mission detail → Start → Field Mode → offline emulation → 2 observations → offline reload (shell and mission load, queue intact) → online → queue synced → Finish → report summary by gemma3:4b.

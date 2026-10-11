@@ -16,7 +16,7 @@ server/src/
   openapi.ts             OpenAPI 3.1 generated from shared schemas
   db.ts                  Mongo connection, indexes, in-memory dev mode
 web/src/
-  store.ts               all IndexedDB access + op queue (flush, backoff, conflicts)
+  store.ts               all IndexedDB access + op queue (flush, per-mission ordering, backoff, conflicts, reconciliation)
   api.ts                 fetch wrapper, session token, typed endpoints
   App.tsx                shell, hash router, sync loop, Discover, Mission detail, History
   Field.tsx              Field Mode, Completion
@@ -52,4 +52,4 @@ No multi-document transactions; every guarantee comes from a single-document ato
 **Sync** reserves each opId before applying it: insert `{opId, ownerId, status: pending, lease, leaseUntil}` into `sync_records` (unique `opId`). The holder applies the op and finalizes the row with a conditional update on its lease. A request that hits the duplicate key reads the row: another owner → `rejected / OPID_CONFLICT`; final → `duplicate` with the stored result (including `reportId`); pending with a live lease → `retry / IN_PROGRESS`; pending with an expired lease (holder crashed, `RULES.syncLeaseMs` = 30 s) → taken over with an atomic `findOneAndUpdate` on `{status: pending, leaseUntil ≤ now}`. Re-applying after a takeover is safe because transitions dedupe on `missions.appliedOpIds` and observations on the unique `observations.opId`. Server errors and optimistic-concurrency losses delete the reservation instead of caching it, so only deterministic outcomes (applied, invalid transition, not found, validation) become the stored answer.
 
 ## Frontend
-Hash routing, no router library. One sync loop (on load, on `online`, and every 15 s). Every Field Mode action goes through the queue, online or offline. The service worker (Workbox via vite-plugin-pwa) precaches the app shell only; API responses aren't cached by the SW, because mission data lives in IndexedDB.
+Hash routing, no router library. One sync loop (on load, on `online`, and every 15 s), serialised per tab and across tabs with a Web Lock. Every Field Mode action goes through the queue, online or offline. Ops are sent in order per mission, and a refused op holds back the rest of its mission until the user acts (see OFFLINE_SYNC.md). The service worker (Workbox via vite-plugin-pwa) precaches the app shell only; API responses aren't cached by the SW, because mission data lives in IndexedDB.

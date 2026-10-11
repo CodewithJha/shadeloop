@@ -84,15 +84,21 @@ export const ObservationValue = z
   });
 export type ObservationValue = z.infer<typeof ObservationValue>;
 
+/** The client's clock when it sent the request. Lets the server remove the client clock's offset from `clientTs`. */
+const sentAt = isoDate.optional();
+
 export const ObservationInput = z.intersection(
   ObservationValue,
-  z.object({ opId: z.uuid(), clientTs: isoDate }),
+  z.object({ opId: z.uuid(), clientTs: isoDate, sentAt }),
 );
+
+/** Longest duration a report accepts from the user, and trusts from timestamps. */
+export const MAX_ACTUAL_MINUTES = 240;
 
 export const CompletePayload = z
   .object({
     completionStatus: z.enum(['completed', 'partial']).default('completed'),
-    actualMinutes: z.number().int().min(0).max(600).optional(),
+    actualMinutes: z.number().int().min(0).max(MAX_ACTUAL_MINUTES).optional(),
     rating: z.number().int().min(1).max(5).optional(),
     feedback: z.string().trim().max(1000).optional(),
     currentStep: z.number().int().min(0).max(50).optional(),
@@ -100,7 +106,7 @@ export const CompletePayload = z
   .strict();
 
 export const TransitionPayload = z
-  .object({ clientTs: isoDate.optional(), currentStep: z.number().int().min(0).max(50).optional() })
+  .object({ clientTs: isoDate.optional(), sentAt, currentStep: z.number().int().min(0).max(50).optional() })
   .strict();
 
 export const SyncOp = z.discriminatedUnion('type', [
@@ -117,7 +123,7 @@ export const SyncOp = z.discriminatedUnion('type', [
   ),
 ]);
 export type SyncOp = z.infer<typeof SyncOp>;
-export const SyncRequest = z.object({ ops: z.array(SyncOp).min(1).max(50) }).strict();
+export const SyncRequest = z.object({ ops: z.array(SyncOp).min(1).max(50), sentAt }).strict();
 
 export const NoteParseRequest = z.object({ text: z.string().trim().min(1).max(1000) }).strict();
 
@@ -275,7 +281,8 @@ export interface Report {
     expectations: Mission['expectations'];
   };
   actual: {
-    minutes: number;
+    /** `null` when timestamps gave an implausible duration (negative or over `MAX_ACTUAL_MINUTES`); never counted in analytics. */
+    minutes: number | null;
     minutesSource: 'user' | 'timestamps';
     stepsReached: number;
     observations: { attribute: Attribute; value: string; observedAt: string }[];

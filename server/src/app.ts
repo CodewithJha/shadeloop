@@ -28,7 +28,7 @@ import { lastCall, statusFrom } from './integrations.ts';
 import { keywordObservations } from './fallback.ts';
 import { discover } from './providers.ts';
 import { analyticsAttributes, analyticsOverview, createOwner, deleteData, exportData, getPrefs, ownerFromToken, putPrefs } from './account.ts';
-import { addObservation, getMission, getReport, history, listMissions, listObservations, missionView, planMissions, sync, transition } from './missions.ts';
+import { addObservation, clockOffset, getMission, getReport, history, listMissions, listObservations, missionView, planMissions, sync, transition } from './missions.ts';
 import { openapi } from './openapi.ts';
 
 function parse<T>(schema: z.ZodType<T>, data: unknown): T {
@@ -49,7 +49,7 @@ const Page = z.object({
     .pipe(z.array(z.enum(MISSION_STATUSES)))
     .optional(),
 });
-const CompleteBody = CompletePayload.extend({ clientTs: z.iso.datetime({ offset: true }).optional() });
+const CompleteBody = CompletePayload.extend({ clientTs: TransitionPayload.shape.clientTs, sentAt: TransitionPayload.shape.sentAt });
 
 const NOT_IMPLEMENTED = ['elevenlabs', 'sentry', 'tiger-data', 'mastra', 'temporal', 'backboard', 'tabpfn'];
 
@@ -179,7 +179,8 @@ export function createApp() {
   });
 
   api.post('/missions/:id/observations', async (req, res) => {
-    const r = await addObservation(owner(res), parse(Id, req.params.id), parse(ObservationInput, req.body));
+    const { sentAt, ...input } = parse(ObservationInput, req.body);
+    const r = await addObservation(owner(res), parse(Id, req.params.id), { ...input, offsetMs: clockOffset(sentAt) });
     const { ownerId: _o, _id, ...o } = r.observation;
     res.status(r.duplicate ? 200 : 201).json({ observation: { id: _id, ...o }, duplicate: r.duplicate, evidence: r.evidence });
   });
@@ -204,18 +205,19 @@ export function createApp() {
     if (!MISSION_ACTIONS.includes(action)) throw new AppError(404, 'NOT_FOUND', 'Unknown action');
     const id = parse(Id, req.params.id);
     if (action === 'complete') {
-      const { clientTs, currentStep, ...rest } = parse(CompleteBody, req.body ?? {});
-      const r = await transition(owner(res), id, action, { clientTs, currentStep, complete: rest });
+      const { clientTs, sentAt, currentStep, ...rest } = parse(CompleteBody, req.body ?? {});
+      const r = await transition(owner(res), id, action, { clientTs, offsetMs: clockOffset(sentAt), currentStep, complete: rest });
       res.json({ mission: r.mission, reportId: r.reportId });
       return;
     }
-    const { clientTs, currentStep } = parse(TransitionPayload, req.body ?? {});
-    const r = await transition(owner(res), id, action, { clientTs, currentStep });
+    const { clientTs, sentAt, currentStep } = parse(TransitionPayload, req.body ?? {});
+    const r = await transition(owner(res), id, action, { clientTs, offsetMs: clockOffset(sentAt), currentStep });
     res.json({ mission: r.mission, reportId: r.reportId });
   });
 
   api.post('/sync', async (req, res) => {
-    res.json({ results: await sync(owner(res), parse(SyncRequest, req.body).ops) });
+    const { ops, sentAt } = parse(SyncRequest, req.body);
+    res.json({ results: await sync(owner(res), ops, sentAt) });
   });
 
   api.get('/history', async (req, res) => {

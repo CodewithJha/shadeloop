@@ -60,7 +60,10 @@ export type ObservationDoc = {
   attribute: Attribute;
   value: string;
   sourceType: 'user_report';
+  /** Event time: the client's time corrected to the server clock and clamped (see `eventTime`). */
   clientTs: string;
+  /** `clientTs` exactly as the client sent it. Absent on rows stored before 2026-10-11. */
+  clientTsRaw?: string;
   serverTs: string;
   locationId: string | null;
   verificationStatus: 'unverified';
@@ -416,11 +419,18 @@ export async function listObservations(ownerId: string, missionId: string) {
 
 /* ---------------- Transitions ---------------- */
 
-/** Validate a client timestamp: reject the future (beyond skew), clamp so events never precede the previous one. */
-function eventTime(clientTs: string | undefined, floorIso: string): string {
+/** Server clock minus client clock, from the client's `sentAt`. Overstates by the request's latency. Undefined without `sentAt`. */
+export const clockOffset = (sentAt: string | undefined) => (sentAt ? Date.now() - Date.parse(sentAt) : undefined);
+
+/**
+ * A client timestamp moved onto the server clock. With a known offset it is shifted by it and clamped to now; without
+ * one (older clients) a time more than `clockSkewMs` ahead is refused. Never before `floorIso` (the previous event).
+ */
+function eventTime(clientTs: string | undefined, floorIso: string, offsetMs?: number): string {
   const now = Date.now();
-  const t = clientTs ? Date.parse(clientTs) : now;
-  if (t > now + RULES.clockSkewMs) throw new AppError(400, 'CLOCK_SKEW', 'clientTs is in the future');
+  let t = clientTs ? Date.parse(clientTs) : now;
+  if (offsetMs !== undefined) t = Math.min(t + offsetMs, now);
+  else if (t > now + RULES.clockSkewMs) throw new AppError(400, 'CLOCK_SKEW', 'clientTs is in the future');
   return new Date(Math.max(t, Date.parse(floorIso))).toISOString();
 }
 
@@ -430,7 +440,7 @@ export async function transition(
   ownerId: string,
   id: string,
   action: MissionAction,
-  opts: { clientTs?: string; opId?: string; currentStep?: number; complete?: Partial<CompleteInput> } = {},
+  opts: { clientTs?: string; offsetMs?: number; opId?: string; currentStep?: number; complete?: Partial<CompleteInput> } = {},
 ) {
   const m = await getMission(ownerId, id);
   // Repeating a complete (same opId or not) returns the one report, building it if a crash left it missing.
@@ -442,7 +452,7 @@ export async function transition(
   const to = nextStatus(m.status, action);
   if (!to) throw new AppError(409, 'INVALID_TRANSITION', `Cannot ${action} a mission that is ${m.status}`, { currentStatus: m.status, action });
 
-  const ts = eventTime(opts.clientTs, m.session.lastEventAt ?? m.createdAt);
+  const ts = eventTime(opts.clientTs, m.session.lastEventAt ?? m.createdAt, opts.offsetMs);
   const s = { ...m.session, lastEventAt: ts };
   const closePause = () => {
     if (s.pausedAt) s.totalPausedMs += Date.parse(ts) - Date.parse(s.pausedAt);
@@ -532,7 +542,9 @@ async function buildReport(m: MissionDoc, id: string): Promise<ReportDoc> {
       result: compareObservation(ATTRIBUTES[attribute], expected, observed),
     } as Report['comparisons'][number];
   });
-  const computed = Math.max(0, Math.round((Date.parse(s.completedAt!) - Date.parse(s.startedAt!) - s.totalPausedMs) / 60_000));
+  // Active time between corrected event times. Negative or over-long (e.g. left running and completed days later) is not a duration.
+  const timed = (Date.parse(s.completedAt!) - Date.parse(s.startedAt!) - s.totalPausedMs) / 60_000;
+  const computed = timed >= 0 && timed <= RULES.maxActualMinutes ? Math.round(timed) : null;
   const actualMinutes = s.userMinutes ?? computed;
   const completionStatus = s.completionStatus ?? 'completed';
   const facts = {
@@ -579,7 +591,11 @@ async function buildReport(m: MissionDoc, id: string): Promise<ReportDoc> {
 
 /* ---------------- Observations ---------------- */
 
-export async function addObservation(ownerId: string, missionId: string, input: { attribute: Attribute; value: string; opId: string; clientTs: string }) {
+export async function addObservation(
+  ownerId: string,
+  missionId: string,
+  input: { attribute: Attribute; value: string; opId: string; clientTs: string; offsetMs?: number },
+) {
   const m = await getMission(ownerId, missionId);
   const notActive = (status: Mission['status']) =>
     new AppError(409, 'MISSION_NOT_ACTIVE', `Observations need an active or paused mission (currently ${status})`, { currentStatus: status });
@@ -594,7 +610,8 @@ export async function addObservation(ownerId: string, missionId: string, input: 
     attribute: input.attribute,
     value: input.value,
     sourceType: 'user_report',
-    clientTs: eventTime(input.clientTs, m.session.startedAt ?? m.createdAt),
+    clientTs: eventTime(input.clientTs, m.session.startedAt ?? m.createdAt, input.offsetMs),
+    clientTsRaw: input.clientTs,
     serverTs: new Date().toISOString(),
     locationId,
     verificationStatus: 'unverified',
@@ -661,14 +678,16 @@ type SyncRecord = {
 async function applyOp(
   ownerId: string,
   op: SyncOp,
+  offsetMs: number | undefined,
 ): Promise<{ status: Exclude<SyncResult['status'], 'duplicate'>; result?: Record<string, unknown>; error?: SyncResult['error'] }> {
   try {
     if (op.type === 'observation') {
-      const r = await addObservation(ownerId, op.missionId, { ...op.payload, opId: op.opId, clientTs: op.clientTs });
+      const r = await addObservation(ownerId, op.missionId, { ...op.payload, opId: op.opId, clientTs: op.clientTs, offsetMs });
       return { status: 'applied', result: { observationId: r.observation._id } };
     }
     const r = await transition(ownerId, op.missionId, op.type, {
       clientTs: op.clientTs,
+      offsetMs,
       opId: op.opId,
       currentStep: op.payload?.currentStep,
       complete: op.type === 'complete' ? op.payload : undefined,
@@ -724,8 +743,11 @@ async function reserve(ownerId: string, op: SyncOp): Promise<string | SyncResult
 /**
  * Apply ops in order, each at most once per opId. Repeated opIds return the stored result. Server errors release the
  * op and abort the batch so the client retries; a `retry` result stops the batch too, so later ops never run out of order.
+ * One clock offset (from `sentAt`) applies to the whole batch, so ops keep their order and spacing. An op's times are
+ * fixed when it is first applied; a resend with a later `sentAt` returns the stored result.
  */
-export async function sync(ownerId: string, ops: SyncOp[]): Promise<SyncResult[]> {
+export async function sync(ownerId: string, ops: SyncOp[], sentAt?: string): Promise<SyncResult[]> {
+  const offsetMs = clockOffset(sentAt);
   const results: SyncResult[] = [];
   for (const op of ops) {
     const lease = await reserve(ownerId, op);
@@ -736,7 +758,7 @@ export async function sync(ownerId: string, ops: SyncOp[]): Promise<SyncResult[]
     }
     let res: Awaited<ReturnType<typeof applyOp>>;
     try {
-      res = await applyOp(ownerId, op);
+      res = await applyOp(ownerId, op, offsetMs);
     } catch (e) {
       await syncRecords().deleteOne({ opId: op.opId, lease });
       throw e;

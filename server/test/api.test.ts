@@ -389,6 +389,201 @@ describe('offline sync', () => {
   });
 });
 
+const MIN = 60_000;
+const iso = (t: number) => new Date(t).toISOString();
+/** A planned mission backdated as if planned `ago` ms earlier, so offline events can fall between then and now. */
+async function backdated(h: Record<string, string>, ago: number) {
+  const [m] = (await plan(h)).missions;
+  await col('missions').updateOne({ _id: m.id as never }, { $set: { createdAt: iso(Date.now() - ago) } });
+  return m;
+}
+const syncBody = (h: Record<string, string>, body: object) => request(app).post(`${api}/sync`).set(h).send(body);
+const getMission = async (h: Record<string, string>, id: string) => (await request(app).get(`${api}/missions/${id}`).set(h).expect(200)).body as Mission;
+const listObs = async (h: Record<string, string>, id: string) =>
+  (await request(app).get(`${api}/missions/${id}/observations`).set(h).expect(200)).body.items as { clientTs: string; clientTsRaw: string; serverTs: string }[];
+const reportOf = async (h: Record<string, string>, reportId: string) => (await request(app).get(`${api}/reports/${reportId}`).set(h).expect(200)).body as Report;
+
+describe('client clock correction (sentAt)', () => {
+  /** Ops at real times `at` (ms ago), stamped by a device clock that is `skew` ms off, sent now. */
+  const offlineBatch = (missionId: string, skew: number, at: { start: number; obs: number[]; complete: number }) => {
+    const t = Date.now();
+    const ts = (ago: number) => iso(t - ago + skew);
+    return {
+      sentAt: ts(0),
+      ops: [
+        { opId: uuid(), missionId, clientTs: ts(at.start), type: 'start' },
+        ...at.obs.map((ago, i) => ({ opId: uuid(), missionId, clientTs: ts(ago), type: 'observation', payload: { attribute: i % 2 ? 'crowding' : 'noise_level', value: i % 2 ? 'busy' : 'quiet' } })),
+        { opId: uuid(), missionId, clientTs: ts(at.complete), type: 'complete' },
+      ],
+    };
+  };
+
+  it.each([
+    ['1 h ahead', 60 * MIN],
+    ['2 h behind', -120 * MIN],
+    ['1 day behind', -24 * 60 * MIN],
+  ])('corrects a device clock %s onto the server clock, keeping order and spacing', async (_name, skew) => {
+    const h = await session();
+    const m = await backdated(h, 60 * MIN);
+    const body = offlineBatch(m.id, skew, { start: 30 * MIN, obs: [25 * MIN, 20 * MIN, 15 * MIN], complete: 10 * MIN });
+    const r = await syncBody(h, body).expect(200);
+    expect(r.body.results.map((x: { status: string }) => x.status)).toEqual(['applied', 'applied', 'applied', 'applied', 'applied']);
+
+    const real = Date.parse(body.sentAt) - skew; // what the device clock should have read when it sent
+    const near = (got: string, ago: number) => expect(Math.abs(Date.parse(got) - (real - ago))).toBeLessThan(5_000);
+    const mission = await getMission(h, m.id);
+    near(mission.session.startedAt!, 30 * MIN);
+    near(mission.session.completedAt!, 10 * MIN);
+    const obs = await listObs(h, m.id);
+    expect(obs.map((o) => o.clientTsRaw)).toEqual(body.ops.slice(1, 4).map((o) => o.clientTs));
+    const times = obs.map((o) => Date.parse(o.clientTs));
+    expect(times.slice(1).map((x, i) => x - times[i])).toEqual([5 * MIN, 5 * MIN]);
+    expect(Date.parse(obs[0].clientTs) - Date.parse(mission.session.startedAt!)).toBe(5 * MIN);
+    near(obs[0].clientTs, 25 * MIN);
+
+    const report = await reportOf(h, r.body.results[4].result.reportId);
+    expect(report.actual).toMatchObject({ minutes: 20, minutesSource: 'timestamps' });
+  });
+
+  it('fixes an op’s times when first applied: a resend with a later sentAt changes nothing', async () => {
+    const h = await session();
+    const m = await backdated(h, 60 * MIN);
+    const body = offlineBatch(m.id, 0, { start: 30 * MIN, obs: [20 * MIN], complete: 10 * MIN });
+    await syncBody(h, { ...body, ops: body.ops.slice(0, 2) }).expect(200);
+    const before = { mission: await getMission(h, m.id), obs: await listObs(h, m.id) };
+
+    const later = await syncBody(h, { ...body, ops: body.ops.slice(0, 2), sentAt: iso(Date.parse(body.sentAt) - 45 * MIN) }).expect(200);
+    expect(later.body.results.map((x: { status: string }) => x.status)).toEqual(['duplicate', 'duplicate']);
+    const after = { mission: await getMission(h, m.id), obs: await listObs(h, m.id) };
+    expect(after.mission.session.startedAt).toBe(before.mission.session.startedAt);
+    expect(after.obs).toEqual(before.obs);
+  });
+
+  it('clamps corrected times into [previous event, server now] instead of refusing them', async () => {
+    const h = await session();
+    const m = await backdated(h, 10 * MIN);
+    const sentAt = now();
+    // The device clock jumped between recording and sending: one op claims a time after the send, one before the plan.
+    const r = await syncBody(h, {
+      sentAt,
+      ops: [
+        { opId: uuid(), missionId: m.id, clientTs: iso(Date.now() - 24 * 60 * MIN), type: 'start' },
+        { opId: uuid(), missionId: m.id, clientTs: iso(Date.now() + 120 * MIN), type: 'observation', payload: { attribute: 'crowding', value: 'busy' } },
+      ],
+    }).expect(200);
+    expect(r.body.results.map((x: { status: string }) => x.status)).toEqual(['applied', 'applied']);
+    const mission = await getMission(h, m.id);
+    expect(mission.session.startedAt).toBe((await col('missions').findOne({ _id: m.id as never }))!.createdAt);
+    const [o] = await listObs(h, m.id);
+    expect(Date.parse(o.clientTs)).toBeLessThanOrEqual(Date.parse(o.serverTs));
+    expect(Date.parse(o.clientTs)).toBeGreaterThan(Date.now() - MIN);
+  });
+
+  it('refuses missing or invalid timestamps with VALIDATION_ERROR', async () => {
+    const h = await session();
+    const [m] = (await plan(h)).missions;
+    const op = { opId: uuid(), missionId: m.id, clientTs: now(), type: 'start' };
+    for (const body of [{ ops: [{ ...op, clientTs: 'yesterday' }] }, { ops: [{ ...op, clientTs: undefined }] }, { ops: [op], sentAt: 'now' }, { ops: [op], sentAt: 1_700_000_000_000 }]) {
+      const r = await syncBody(h, body).expect(400);
+      expect(r.body.error.code).toBe('VALIDATION_ERROR');
+    }
+    expect((await getMission(h, m.id)).status).toBe('planned');
+  });
+
+  it('keeps the legacy rule without sentAt: up to 5 min ahead accepted as sent, beyond refused as CLOCK_SKEW', async () => {
+    const h = await session();
+    const [m] = (await plan(h)).missions;
+    const ahead = iso(Date.now() + 4 * MIN);
+    const ok = await syncBody(h, { ops: [{ opId: uuid(), missionId: m.id, clientTs: ahead, type: 'start' }] }).expect(200);
+    expect(ok.body.results[0].status).toBe('applied');
+    expect((await getMission(h, m.id)).session.startedAt).toBe(ahead);
+    const far = await syncBody(h, { ops: [{ opId: uuid(), missionId: m.id, clientTs: iso(Date.now() + 6 * MIN), type: 'pause' }] }).expect(200);
+    expect(far.body.results[0]).toMatchObject({ status: 'rejected', error: { code: 'CLOCK_SKEW' } });
+  });
+
+  it('corrects direct transition and observation requests that send sentAt', async () => {
+    const h = await session();
+    const m = await backdated(h, 60 * MIN);
+    const skew = 90 * MIN;
+    const clientNow = () => Date.now() + skew;
+    await request(app).post(`${api}/missions/${m.id}/start`).set(h).send({ clientTs: iso(clientNow() - 10 * MIN), sentAt: iso(clientNow()) }).expect(200);
+    await request(app)
+      .post(`${api}/missions/${m.id}/observations`)
+      .set(h)
+      .send({ attribute: 'crowding', value: 'busy', opId: uuid(), clientTs: iso(clientNow() - 5 * MIN), sentAt: iso(clientNow()) })
+      .expect(201);
+    const done = await request(app).post(`${api}/missions/${m.id}/complete`).set(h).send({ clientTs: iso(clientNow()), sentAt: iso(clientNow()) }).expect(200);
+    expect(Math.abs(Date.parse((await getMission(h, m.id)).session.startedAt!) - (Date.now() - 10 * MIN))).toBeLessThan(5_000);
+    expect(Math.abs(Date.parse((await listObs(h, m.id))[0].clientTs) - (Date.now() - 5 * MIN))).toBeLessThan(5_000);
+    expect((await reportOf(h, done.body.reportId)).actual).toMatchObject({ minutes: 10, minutesSource: 'timestamps' });
+  });
+});
+
+describe('durations', () => {
+  /** Start `startAgo` ms ago and complete now (server-corrected), optionally with user minutes. */
+  async function finished(h: Record<string, string>, startAgo: number, complete: object = {}) {
+    const m = await backdated(h, startAgo + MIN);
+    const t = now();
+    const r = await syncBody(h, {
+      sentAt: t,
+      ops: [
+        { opId: uuid(), missionId: m.id, clientTs: iso(Date.parse(t) - startAgo), type: 'start' },
+        { opId: uuid(), missionId: m.id, clientTs: t, type: 'complete', payload: complete },
+      ],
+    }).expect(200);
+    expect(r.body.results.map((x: { status: string }) => x.status)).toEqual(['applied', 'applied']);
+    return reportOf(h, r.body.results[1].result.reportId);
+  }
+
+  it('refuses user minutes outside 0..240 with 400 and keeps valid ones as user-sourced', async () => {
+    const h = await session();
+    const [m] = (await plan(h)).missions;
+    await request(app).post(`${api}/missions/${m.id}/start`).set(h).send({}).expect(200);
+    for (const actualMinutes of [241, 600, -1, 12.5]) {
+      const r = await request(app).post(`${api}/missions/${m.id}/complete`).set(h).send({ actualMinutes }).expect(400);
+      expect(r.body.error.code).toBe('VALIDATION_ERROR');
+    }
+    expect((await getMission(h, m.id)).status).toBe('active');
+    const done = await request(app).post(`${api}/missions/${m.id}/complete`).set(h).send({ actualMinutes: 240 }).expect(200);
+    expect((await reportOf(h, done.body.reportId)).actual).toMatchObject({ minutes: 240, minutesSource: 'user' });
+    expect((await finished(h, 5 * MIN, { actualMinutes: 0 })).actual).toMatchObject({ minutes: 0, minutesSource: 'user' });
+  });
+
+  it('keeps a long mission within the limit and marks an interrupted one unknown', async () => {
+    const h = await session();
+    expect((await finished(h, 200 * MIN)).actual).toMatchObject({ minutes: 200, minutesSource: 'timestamps' });
+    const interrupted = await finished(h, 2 * 24 * 60 * MIN);
+    expect(interrupted.actual).toMatchObject({ minutes: null, minutesSource: 'timestamps' });
+    expect(interrupted.summary.text).toMatch(/^Completed "[^"]+" \(planned \d+ min; actual duration unknown\)\./);
+  });
+
+  it('marks inconsistent stored timestamps unknown when the report is (re)built', async () => {
+    const h = await session();
+    const [m] = (await plan(h)).missions;
+    const reportId = uuid();
+    const s = (await col('missions').findOne({ _id: m.id as never }))!.session;
+    await col('missions').updateOne(
+      { _id: m.id as never },
+      { $set: { status: 'completed', reportId, session: { ...s, startedAt: iso(Date.now()), completedAt: iso(Date.now() - 30 * MIN), completionStatus: 'completed' } } },
+    );
+    expect((await reportOf(h, reportId)).actual).toMatchObject({ minutes: null, minutesSource: 'timestamps' });
+  });
+
+  it('aggregates only trusted durations and says how many were left out', async () => {
+    const h = await session();
+    await finished(h, 200 * MIN);
+    await finished(h, 3 * 24 * 60 * MIN);
+    const legacy = await finished(h, 5 * MIN);
+    // A report stored by an older version with an over-cap user value.
+    await col('reports').updateOne({ _id: legacy.id as never }, { $set: { 'actual.minutes': 600, 'actual.minutesSource': 'user' } });
+    const o = (await request(app).get(`${api}/analytics/overview`).set(h).expect(200)).body;
+    expect(o).toMatchObject({ totalMinutesOutside: 200, minutesSampleSize: 1, minutesExcluded: 2, averageMinutes: null });
+    for (let i = 0; i < 4; i++) await finished(h, 10 * MIN);
+    const o2 = (await request(app).get(`${api}/analytics/overview`).set(h).expect(200)).body;
+    expect(o2).toMatchObject({ totalMinutesOutside: 240, minutesSampleSize: 5, minutesExcluded: 2, averageMinutes: 48 });
+  });
+});
+
 describe('preferences, analytics, export', () => {
   it('round-trips preferences and applies them to planning', async () => {
     const h = await session();

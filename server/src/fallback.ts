@@ -177,13 +177,16 @@ export function templateSummary(r: {
   title: string;
   completionStatus: string;
   plannedMinutes: number;
-  actualMinutes: number;
+  actualMinutes: number | null;
   observationCount: number;
   comparisons: { attribute: string; result: string }[];
 }) {
   const diffs = r.comparisons.filter((c) => c.result.startsWith('observed_'));
+  const done = `${r.completionStatus === 'partial' ? 'Partly completed' : 'Completed'} "${r.title}"`;
   const parts = [
-    `${r.completionStatus === 'partial' ? 'Partly completed' : 'Completed'} "${r.title}" in about ${r.actualMinutes} min (planned ${r.plannedMinutes}).`,
+    r.actualMinutes === null
+      ? `${done} (planned ${r.plannedMinutes} min; actual duration unknown).`
+      : `${done} in about ${r.actualMinutes} min (planned ${r.plannedMinutes}).`,
     r.observationCount ? `You recorded ${r.observationCount} observation${r.observationCount === 1 ? '' : 's'}.` : 'No observations were recorded.',
   ];
   if (diffs.length) {

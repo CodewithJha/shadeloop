@@ -178,6 +178,38 @@ describe('evidence aggregation (one owner, one vote)', () => {
   });
 });
 
+describe('freshness with corrected client clocks', () => {
+  const DAY = 86_400_000;
+  /** One owner whose device clock is `skew` ms off reports noise at `loc`, really `ago` ms ago, synced now with sentAt. */
+  async function offlineReport(loc: string, value: string, ago: number, skew: number) {
+    const h = await session();
+    const r = await request(app).post(`${api}/missions/plan`).set(h).send({ availableMinutes: 20, missionType: 'quiet_break' }).expect(201);
+    const m = r.body.missions[0] as Mission;
+    const t = Date.now();
+    await col('missions').updateOne({ _id: m.id as never }, { $set: { createdAt: new Date(t - ago - 30 * DAY).toISOString(), selectedLocation: { id: loc, name: 'Test place' } } });
+    const ts = (x: number) => new Date(x + skew).toISOString();
+    const body = {
+      sentAt: ts(t),
+      ops: [
+        { opId: uuid(), missionId: m.id, clientTs: ts(t - ago - 60_000), type: 'start' },
+        { opId: uuid(), missionId: m.id, clientTs: ts(t - ago), type: 'observation', payload: { attribute: 'noise_level', value } },
+      ],
+    };
+    const res = await request(app).post(`${api}/sync`).set(h).send(body).expect(200);
+    expect(res.body.results.map((x: { status: string }) => x.status)).toEqual(['applied', 'applied']);
+  }
+
+  it('an old report stays stale and a recent one stays fresh, whichever way the device clock is off', async () => {
+    const loc = 'test:freshness';
+    const window = RULES.evidence.freshnessDays.noise_level! * DAY;
+    await offlineReport(loc, 'loud', window + 2 * DAY, 3_600_000);
+    expect(await evidence(loc, 'noise_level')).toMatchObject({ confidence: 'stale', supporting: 0 });
+    // Clock 20 days behind: uncorrected, this recent report would look stale too.
+    await offlineReport(loc, 'quiet', DAY, -20 * DAY);
+    expect(await evidence(loc, 'noise_level')).toMatchObject({ confidence: 'low', estimate: 'quiet', supporting: 1, valueCounts: { quiet: 1 } });
+  });
+});
+
 describe('observation limits', () => {
   it('D: refuses observations over the per-attribute and per-mission caps, directly and via sync', async () => {
     const h = await session();

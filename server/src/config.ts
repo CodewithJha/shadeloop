@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { Attribute, Condition, MissionType } from '@shadeloop/shared';
+import { MAX_ACTUAL_MINUTES, type Attribute, type Condition, type MissionType } from '@shadeloop/shared';
 
 const Env = z
   .object({
@@ -55,7 +55,10 @@ export const RULES = {
   maxCandidates: 3,
   maxDiscoveredLocations: 8,
   walkingSpeedMPerMin: { slow: 55, moderate: 70, brisk: 90 },
+  /** Only for requests without `sentAt`: how far ahead of the server a client timestamp may be. */
   clockSkewMs: 5 * 60_000,
+  /** Reports: user-entered minutes above this are refused (400); timestamp durations outside 0..this become `null`. */
+  maxActualMinutes: MAX_ACTUAL_MINUTES,
   coordDecimals: 2, // ~1.1 km, coarse on purpose
   heatApparentC: 32,
   coldApparentC: 0,

@@ -38,21 +38,26 @@ export async function putPrefs(ownerId: string, prefs: Preferences) {
 }
 
 export async function analyticsOverview(ownerId: string) {
-  const [statusRows, observationCount, minuteRows] = await Promise.all([
+  // Only trusted durations count: `null` (implausible timestamps) and values over the cap stored by older versions are left out.
+  const trusted = { ownerId, 'actual.minutes': { $gte: 0, $lte: RULES.maxActualMinutes } };
+  const [statusRows, observationCount, reportCount, minuteRows] = await Promise.all([
     col<MissionDoc>('missions').aggregate<{ _id: string; n: number }>([{ $match: { ownerId } }, { $group: { _id: '$status', n: { $sum: 1 } } }]).toArray(),
     col('observations').countDocuments({ ownerId }),
-    col('reports').aggregate<{ total: number; n: number }>([{ $match: { ownerId } }, { $group: { _id: null, total: { $sum: '$actual.minutes' }, n: { $sum: 1 } } }]).toArray(),
+    col('reports').countDocuments({ ownerId }),
+    col('reports').aggregate<{ total: number; n: number }>([{ $match: trusted }, { $group: { _id: null, total: { $sum: '$actual.minutes' }, n: { $sum: 1 } } }]).toArray(),
   ]);
   const missions = Object.fromEntries(['planned', 'active', 'paused', 'completed', 'cancelled'].map((s) => [s, statusRows.find((r) => r._id === s)?.n ?? 0]));
   const started = missions.active + missions.paused + missions.completed + missions.cancelled;
   const enough = started >= RULES.minAnalyticsSamples;
-  const reportsCount = minuteRows[0]?.n ?? 0;
+  const timed = minuteRows[0]?.n ?? 0;
   return {
     missions,
     observations: observationCount,
     totalMinutesOutside: minuteRows[0]?.total ?? 0,
+    minutesSampleSize: timed,
+    minutesExcluded: reportCount - timed,
     completionRate: enough ? missions.completed / started : null,
-    averageMinutes: reportsCount >= RULES.minAnalyticsSamples ? Math.round(minuteRows[0].total / reportsCount) : null,
+    averageMinutes: timed >= RULES.minAnalyticsSamples ? Math.round(minuteRows[0].total / timed) : null,
     sampleSize: started,
     minSamples: RULES.minAnalyticsSamples,
     insufficientData: !enough,

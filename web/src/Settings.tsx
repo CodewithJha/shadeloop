@@ -11,6 +11,7 @@ export function Settings() {
   const [prefs, setPrefs] = useState<Preferences | null>(null);
   const [saved, setSaved] = useState('');
   const [error, setError] = useState('');
+  const [dataError, setDataError] = useState('');
   const [coarse, setCoarse] = useState<Coords | undefined>();
   const [locMsg, setLocMsg] = useState('');
   const [deps, setDeps] = useState<{ dependencies: Dependency[]; notImplemented: string[] } | null>(null);
@@ -34,7 +35,7 @@ export function Settings() {
       .catch((e: Error) => setError(e.message));
   }, [online]);
 
-  if (!prefs) return <p>{error ? `Could not load settings: ${error}` : 'Loading…'}</p>;
+  if (!prefs) return error ? <p role="alert">Could not load settings: {error}</p> : <p>Loading…</p>;
   const set = (patch: Partial<Preferences>) => setPrefs({ ...prefs, ...patch });
 
   async function save(e: FormEvent) {
@@ -74,22 +75,28 @@ export function Settings() {
   }
 
   async function exportData() {
-    const data = await api.exportData();
-    const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
-    const a = Object.assign(document.createElement('a'), { href: url, download: 'shadeloop-export.json' });
-    a.click();
-    URL.revokeObjectURL(url);
+    setDataError('');
+    try {
+      const data = await api.exportData();
+      const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
+      const a = Object.assign(document.createElement('a'), { href: url, download: 'shadeloop-export.json' });
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setDataError(`Could not download your data: ${(err as Error).message}`);
+    }
   }
 
   async function deleteAll() {
     if (!confirm('Delete all your missions, observations, reports and preferences from the server and this device? This cannot be undone.')) return;
+    setDataError('');
     try {
       await api.deleteMe();
       await clearAll();
       location.hash = '/';
       location.reload();
     } catch (err) {
-      setError((err as Error).message);
+      setDataError(`Could not delete your data: ${(err as Error).message}`);
     }
   }
 
@@ -200,7 +207,7 @@ export function Settings() {
       <h2>Integrations</h2>
       <p className="hint">Status comes from the server. “Verified” means a live call succeeded, not just that a key is present.</p>
       {deps ? (
-        <>
+        <div className="scroll-x" role="region" aria-label="Integration status" tabIndex={0}>
           <table>
             <thead>
               <tr>
@@ -234,7 +241,7 @@ export function Settings() {
             </tbody>
           </table>
           <p className="meta">Not implemented: {deps.notImplemented.join(', ')}.</p>
-        </>
+        </div>
       ) : (
         <p className="meta">{online ? 'Loading…' : 'Unavailable offline.'}</p>
       )}
@@ -251,6 +258,11 @@ export function Settings() {
           Delete all my data
         </button>
       </div>
+      {dataError && (
+        <p className="notice error" role="alert">
+          {dataError}
+        </p>
+      )}
     </>
   );
 }

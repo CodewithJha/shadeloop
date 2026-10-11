@@ -22,6 +22,7 @@ body {
   background: var(--paper);
   color: var(--ink);
   font: 1rem/1.5 var(--sans);
+  overflow-wrap: break-word;
 }
 
 h1, h2, h3 { font-family: var(--serif); line-height: 1.2; margin: 1.6em 0 0.5em; text-wrap: balance; }
@@ -42,9 +43,11 @@ a { color: var(--green); }
   background: var(--paper);
   border-bottom: 1px solid var(--line);
 }
+/* On a phone the header wraps to ~3 rows; pinned, it would cover a fifth of the screen. */
+@media (max-width: 30rem), (max-height: 30rem) { .top { position: static; } }
 .top-inner, main { max-width: 42rem; margin: 0 auto; padding: 0 1rem; }
 .top-inner { display: flex; align-items: center; gap: 1rem; min-height: 3.25rem; flex-wrap: wrap; }
-.brand { font-family: var(--serif); font-weight: 700; font-size: 1.15rem; color: var(--ink); text-decoration: none; }
+.brand { font-family: var(--serif); font-weight: 700; font-size: 1.15rem; color: var(--ink); text-decoration: none; padding: 0.6rem 0; }
 nav ul { display: flex; gap: 0.25rem; list-style: none; margin: 0; padding: 0; }
 nav a { display: inline-block; padding: 0.6rem 0.6rem; color: var(--ink-2); text-decoration: none; border-radius: var(--radius); }
 nav a[aria-current='page'] { color: var(--ink); text-decoration: underline; text-underline-offset: 6px; text-decoration-thickness: 2px; }
@@ -75,7 +78,8 @@ input[type='number'], input[type='text'], select, textarea {
 textarea { min-height: 5.5rem; resize: vertical; }
 fieldset { border: 1px solid var(--line); border-radius: var(--radius); margin: 1rem 0; padding: 0.5rem 1rem 1rem; }
 legend { font-weight: 600; padding: 0 0.3rem; }
-.check { display: flex; gap: 0.5rem; align-items: center; font-weight: 400; margin: 0.4rem 0; min-height: 32px; }
+.check { display: flex; gap: 0.5rem; align-items: center; font-weight: 400; margin: 0.2rem 0; min-height: 44px; }
+summary { padding: 0.65rem 0; cursor: pointer; }
 .check input { width: 1.25rem; height: 1.25rem; }
 .hint { color: var(--ink-2); font-size: 0.9rem; }
 
@@ -103,7 +107,9 @@ ol.steps { padding-left: 1.4rem; }
 ol.steps li { margin: 0.4rem 0; }
 
 table { border-collapse: collapse; width: 100%; font-size: 0.92rem; }
-th, td { text-align: left; padding: 0.45rem 0.4rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+th, td { text-align: left; padding: 0.45rem 0.4rem; border-bottom: 1px solid var(--line); vertical-align: top; overflow-wrap: anywhere; }
+td .tag { white-space: normal; }
+.scroll-x { overflow-x: auto; }
 th { color: var(--ink-2); font-weight: 600; }
 
 /* Field Mode: one step, large type, big targets. */

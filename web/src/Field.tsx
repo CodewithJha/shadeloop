@@ -161,7 +161,11 @@ export function FieldMode({ id }: { id: string }) {
           {prefs?.voice.voiceNotes && SpeechRecognitionCtor && <p className="hint">Dictation uses your browser's speech recognition, which may send audio to the browser vendor.</p>}
           {!online && <p className="hint">Suggestions need a connection. The quick buttons work offline.</p>}
         </form>
-        {parseInfo && <p className="meta">{parseInfo}</p>}
+        {parseInfo && (
+          <p className="meta" role="status">
+            {parseInfo}
+          </p>
+        )}
         {proposals && proposals.length === 0 && <p>No observations recognised.</p>}
         {proposals?.map((p) => (
           <p key={`${p.attribute}-${p.value}`} className="row">
@@ -379,7 +383,9 @@ export function Completion({ id }: { id: string }) {
           )}
         </>
       ) : reportError ? (
-        <p className="notice error">Could not load the report: {reportError}</p>
+        <p className="notice error" role="alert">
+          Could not load the report: {reportError}
+        </p>
       ) : local.status === 'completed' ? (
         <p className="notice">{online ? 'Generating the report once your changes sync…' : 'You are offline. The report will be generated when your changes sync.'}</p>
       ) : (

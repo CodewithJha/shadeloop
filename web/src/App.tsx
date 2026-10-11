@@ -88,10 +88,14 @@ function SyncBadge() {
   const { ops, online } = useSync();
   const conflicts = [...heldOps(ops).values()].flat().length;
   const waiting = ops.filter((o) => o.state !== 'synced').length - conflicts;
-  const text = `${online ? 'Online' : 'Offline'} · ${conflicts ? `${conflicts} need attention` : waiting ? `${waiting} waiting to sync` : 'all synced'}`;
+  // Only connectivity and problems are announced; the waiting count changes on every tap and would be noise.
   return (
-    <span className={`sync${conflicts || (!online && waiting) ? ' warn' : ''}`} role="status" aria-live="polite">
-      {text}
+    <span className={`sync${conflicts || (!online && waiting) ? ' warn' : ''}`}>
+      <span role="status">
+        {online ? 'Online' : 'Offline'}
+        {conflicts ? ` · ${conflicts} need attention` : ''}
+      </span>
+      {!conflicts && (waiting ? ` · ${waiting} waiting to sync` : ' · all synced')}
     </span>
   );
 }
@@ -415,7 +419,7 @@ function MissionDetail({ id }: { id: string }) {
     return unsub;
   }, [id]);
 
-  if (!c) return <p>{error ? `Could not load this mission: ${error}` : online ? 'Loading…' : 'This mission is not saved on this device.'}</p>;
+  if (!c) return error ? <p role="alert">Could not load this mission: {error}</p> : <p>{online ? 'Loading…' : 'This mission is not saved on this device.'}</p>;
   const { mission: m, local } = c;
 
   async function start() {
@@ -531,7 +535,11 @@ function History() {
   return (
     <>
       <h1>History &amp; insights</h1>
-      {error && <p className="notice error">Could not load history: {error}</p>}
+      {error && (
+        <p className="notice error" role="alert">
+          Could not load history: {error}
+        </p>
+      )}
       {!online && <p className="notice">Offline: showing missions saved on this device only.</p>}
       {overview && (
         <section aria-labelledby="insights">

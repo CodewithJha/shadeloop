@@ -103,7 +103,8 @@ For a demo without network discovery, set `DISCOVERY_MODE=fixture`. Places are t
 
 - No real auth: anonymous bearer-token sessions only. Clearing site data loses access to your missions.
 - No routing. Distances are straight-line from a coarse (about 1 km) location, and travel time is an estimate.
-- Evidence needs several independent sessions to reach `moderate`. Sessions are not identities, so one person with many sessions can skew it.
+- Evidence needs several independent sessions to reach `moderate`. Sessions are not identities, and presence at a place is not checked, so one person with a few sessions can skew it without being there. A session counts once per place and attribute, and a mission accepts at most 40 observations (10 per attribute), so a single session can't flood other reports away. There is no minimum session age or mission duration for a report to count: both would be easy to wait out.
+- Nothing is verified. No verified accessibility source is integrated (OSM `wheelchair` tags are not used), so step-free access, seating and path condition always show as **unverified** with a "check access yourself" notice, even when reports agree. OpenStreetMap place data is labelled "map data".
 - Small local models (gemma3:4b) often overshoot time budgets. The engine shortens or rejects them, then falls back to templates. AI step text may still mention the original duration after the engine shortened it. The comparison table and step durations are the deterministic source of truth.
 - The public Overpass API is sometimes slow or returns 504. Planning then proceeds without named places and says so.
 - English only. Voice uses browser APIs only (Web Speech), where supported.

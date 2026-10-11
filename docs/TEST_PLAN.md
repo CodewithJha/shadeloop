@@ -20,6 +20,14 @@ Run everything: `npm run lint && npm run typecheck && npm test && npm run build`
 - Sync: batch applied, replay all duplicate with the same reportId, pause time excluded from duration, per-op conflicts, not-found rejected, cross-session opId rejected, future timestamps rejected.
 - Preferences validation and effect on planning; analytics insufficient-data; export excludes owner IDs.
 
+## Evidence integrity and accessibility (`server/test/evidence.test.ts`)
+- One owner floods 300 contrary reports over 30 missions via `/sync` (with `maxReportsConsidered` lowered to 5): 3 independent reports stay `moderate`, supporting 3, contradicting 1.
+- Repeated reports from one owner count once, using the latest; distinct owners disagreeing → `conflicting`.
+- An over-cap observation counted by a concurrent recompute is removed from evidence when refused; deleting the only contributor removes the summary.
+- Concurrent observations plus recomputes end equal to a sequential recompute; an older recompute that writes last doesn't overwrite a newer one.
+- Caps: per attribute and per mission → 429 `OBSERVATION_LIMIT` directly, `rejected` via `/sync` (resend → `duplicate` with `originalStatus: rejected`); a concurrent burst never exceeds the cap.
+- Three fresh sessions with zero-duration missions → required `step_free` is `supported` but `provenance: aggregated`, `verification: unverified`, with an uncertainty notice; place line is `external_map_data`; no `verified` label anywhere in the mission. A single report → `user_report`; no reports → `unknown`; non-accessibility conditions unchanged.
+
 ## Web unit tests (`web/src/store.test.ts`, fake-indexeddb)
 Queue persistence across reload, ordering, unique opIds, synced plus reportId hand-off, network backoff timing, 5xx recoverable vs 4xx conflict, per-op conflict surfaced and only removed by dismissal, stuck `syncing` reset.
 Per-mission ordering: an observation never overtakes a `start` that is backing off (503, 429, timeout, `retry`, missing result), the pair resumes in order once due, other missions aren't held, a mid-batch `retry` resumes in order. Same-opId resend after a lost response (no duplicate local observation); stored refusal returned as `duplicate` stays a conflict. No concurrent flush within a tab or while another tab holds the Web Lock. `syncing` op recovered after a reload. Reconciliation: server state adopted when nothing is queued, local kept while ops are queued, refetch after a refusal, 404 → mission `gone`, no further sends, ops kept and serialisable for export.

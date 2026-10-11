@@ -280,6 +280,8 @@ describe('schemas and parsers', () => {
     const noExpectation = templateSummary({ ...base, completionStatus: 'partial', actualMinutes: 7, observationCount: 2, comparisons: [{ attribute: 'crowding', result: 'no_expectation' }, { attribute: 'noise_level', result: 'matched' }] });
     expect(noExpectation).toBe('Partly completed "T" in about 7 min (planned 10). You recorded 2 observations.');
     expect(noExpectation).not.toMatch(/busier|quieter|safer|accessible|than (expected|anticipated)/i);
+    expect(templateSummary({ ...base, actualMinutes: 7, minutesSource: 'user' })).toBe('Completed "T" in about 7 min by your estimate (planned 10). No observations were recorded.');
+    expect(templateSummary({ ...base, actualMinutes: 7, minutesSource: 'timestamps' })).toBe('Completed "T" in about 7 min (planned 10). No observations were recorded.');
   });
   it('rounds coordinates to a coarse grid', () => {
     expect(roundCoords({ lat: 12.97634, lon: 77.59291 })).toEqual({ lat: 12.98, lon: 77.59 });

@@ -178,6 +178,7 @@ export function templateSummary(r: {
   completionStatus: string;
   plannedMinutes: number;
   actualMinutes: number | null;
+  minutesSource?: 'user' | 'timestamps';
   observationCount: number;
   comparisons: { attribute: string; result: string }[];
 }) {
@@ -186,7 +187,7 @@ export function templateSummary(r: {
   const parts = [
     r.actualMinutes === null
       ? `${done} (planned ${r.plannedMinutes} min; actual duration unknown).`
-      : `${done} in about ${r.actualMinutes} min (planned ${r.plannedMinutes}).`,
+      : `${done} in about ${r.actualMinutes} min${r.minutesSource === 'user' ? ' by your estimate' : ''} (planned ${r.plannedMinutes}).`,
     r.observationCount ? `You recorded ${r.observationCount} observation${r.observationCount === 1 ? '' : 's'}.` : 'No observations were recorded.',
   ];
   if (diffs.length) {

@@ -588,7 +588,7 @@ async function buildReport(m: MissionDoc, id: string): Promise<ReportDoc> {
     },
     comparisons,
     feedback: input,
-    summary: { text: templateSummary({ ...facts, observationCount: obs.length }), generator: 'template', provider: null, model: null, fallbackUsed: false, fallbackReason: null },
+    summary: { text: templateSummary({ ...facts, minutesSource: s.userMinutes !== null ? 'user' : 'timestamps', observationCount: obs.length }), generator: 'template', provider: null, model: null, fallbackUsed: false, fallbackReason: null },
     evidenceRefs,
     observationIds: obs.map((o) => o._id),
   };

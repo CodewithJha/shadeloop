@@ -200,7 +200,7 @@ describe('completion report summary', () => {
     const { m, report } = await run(chatty);
     expect(report.comparisons).toEqual([{ attribute: 'crowding', expected: null, expectedConfidence: 'unknown', observed: 'busy', result: 'no_expectation' }]);
     expect(report.summary).toEqual({
-      text: `Completed "${m.title}" in about 7 min (planned ${m.estimatedMinutes}). You recorded 1 observation.`,
+      text: `Completed "${m.title}" in about 7 min by your estimate (planned ${m.estimatedMinutes}). You recorded 1 observation.`,
       generator: 'template',
       provider: null,
       model: null,
@@ -232,7 +232,7 @@ describe('completion report summary', () => {
       env.AI_PROVIDER = 'ollama';
     }
     expect(new Set(texts).size).toBe(1);
-    expect(texts[0]).toMatch(/^Completed "Quiet break outside" in about 7 min \(planned \d+\)\. You recorded 1 observation\.$/);
+    expect(texts[0]).toMatch(/^Completed "Quiet break outside" in about 7 min by your estimate \(planned \d+\)\. You recorded 1 observation\.$/);
   });
 });
 

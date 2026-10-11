@@ -12,7 +12,7 @@ Map apps tell you a park exists. They can't tell you whether the bench is still 
 
 1. **Plan:** a request is parsed into constraints (AI or keyword fallback). Candidates come from AI or templates, then pass the constraint engine: time, walking limit, safety text, real locations only, and required conditions checked against evidence.
 2. **Go:** Field Mode shows one step at a time with big quick-observation buttons (e.g. `shade_quality = none`). Everything is queued in IndexedDB and works offline.
-3. **Report:** completing a mission produces planned-vs-observed comparisons (`observed_lower_than_expected`, …) and a summary (AI or template, always labelled).
+3. **Report:** completing a mission produces planned-vs-observed comparisons (`observed_lower_than_expected`, …) and a deterministic template summary built from the recorded facts (labelled; no AI on the completion path).
 4. **Learn:** each location report updates a categorical evidence summary per (location, attribute): `unknown | low | moderate | conflicting | stale`. Future plans show these and refuse places whose *required* conditions are contradicted.
 
 ## Architecture
@@ -104,7 +104,7 @@ For a demo without network discovery, set `DISCOVERY_MODE=fixture`. Places are t
 - No real auth: anonymous bearer-token sessions only. Clearing site data loses access to your missions.
 - No routing. Distances are straight-line from a coarse (about 1 km) location, and travel time is an estimate.
 - Evidence needs several independent sessions to reach `moderate`. Sessions are not identities, so one person with many sessions can skew it.
-- Small local models (gemma3:4b) often overshoot time budgets. The engine shortens or rejects them, then falls back to templates. AI summaries can over-state (e.g. "busier than anticipated" with no prior reports), and AI step text may still mention the original duration after the engine shortened it. The comparison table and step durations are the deterministic source of truth.
+- Small local models (gemma3:4b) often overshoot time budgets. The engine shortens or rejects them, then falls back to templates. AI step text may still mention the original duration after the engine shortened it. The comparison table and step durations are the deterministic source of truth.
 - The public Overpass API is sometimes slow or returns 504. Planning then proceeds without named places and says so.
 - English only. Voice uses browser APIs only (Web Speech), where supported.
 - The repo lives at `~/ShadeLoop` (see docs/DECISIONS.md, item 0).

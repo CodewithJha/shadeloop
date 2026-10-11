@@ -7,7 +7,7 @@ server/src/
   app.ts                 Express app: middleware, routes, auth, validation, error envelope, static PWA
   config.ts              env (Zod) + RULES (all business limits)
   domain.ts              pure rules: state machine, evidence model, condition checks, constraint engine
-  fallback.ts            templates, keyword parsers, template summary (no AI)
+  fallback.ts            templates, keyword parsers, template report summary (no AI)
   ai.ts                  providers (Ollama, OpenAI-compatible), aiJson() with validation/retry, tasks
   providers.ts           Overpass, SerpApi, fixture discovery; Open-Meteo weather; 10-min in-process cache
   missions.ts            planning, transitions, observations, reports, evidence persistence, sync
@@ -36,7 +36,20 @@ Collections: `owners`, `preferences`, `missions` (session embedded), `observatio
 Key indexes: unique `owners.tokenHash`, unique `observations.opId`, unique `sync_records.opId`, unique `(evidence.locationId, attribute)`, unique `reports.missionId`. TTL indexes: `missions.expireAt` (planned only) and `sync_records.serverTs` (30 days).
 
 ## Concurrency
-Transitions use optimistic concurrency (`version`), and losing writers get a 409. Report creation is unique per mission. Sync idempotency is layered: `sync_records.opId`, then `observations.opId`, then `missions.appliedOpIds`. A crash between applying an op and recording it still dedupes on retry.
+No multi-document transactions; every guarantee comes from a single-document atomic write plus a unique index.
+
+**Transitions** use optimistic concurrency (`version`). A losing writer re-reads the mission: if its opId is already in `appliedOpIds`, or it was a `complete` and the mission is now completed, it returns that outcome; otherwise 409 `CONFLICT`.
+
+**Completion** is one version-checked update that sets `status: completed`, the session, the feedback and a pre-generated `reportId`. Only then is the report built (`ensureReport`) from the persisted observations, with the deterministic template summary (no AI call on this path), and inserted under that id. `_id` and the unique `reports.missionId` make the insert idempotent: concurrent builders all end up reading the first one's report. A pre-existing report under another id (an orphan from the old insert-before-update order) is replaced.
+
+**Report recovery.** If the process dies between the completion update and the report insert, the mission is completed with a `reportId` but no report. These paths call `ensureReport` and rebuild it: a repeated `complete` (same opId or not, direct or via sync), `GET /reports/:id` (falls back to the completed mission holding that `reportId`), `GET /history`, and an observation re-check (below). The client always reaches one of them: it retries the failed `complete` op and opens the report by `reportId`. A repeated `complete` on a completed mission returns the existing report rather than 409.
+
+**Observations vs completion.** `addObservation` checks the mission is active/paused, inserts the row, then re-reads the mission. The row is kept only if the mission is still active/paused, or it is completed and its report contains the row's id (`reports.observationIds`, internal). Otherwise the row is deleted, evidence for its (location, attribute) is recomputed, and the request gets 409 `MISSION_NOT_ACTIVE`. Evidence is only recomputed for kept rows. Why this is safe:
+- Re-read sees active/paused: the completion update comes after the re-read, which comes after the insert, and the report is read after the completion update, so it includes the row.
+- Re-read sees completed: the report is fixed once inserted (built now if missing, which then includes the row). The row is kept exactly when the report has it, so every 201 observation is in the report and every rejected one is not.
+- Re-read sees cancelled: rejected; cancelled missions have no report.
+
+**Sync** reserves each opId before applying it: insert `{opId, ownerId, status: pending, lease, leaseUntil}` into `sync_records` (unique `opId`). The holder applies the op and finalizes the row with a conditional update on its lease. A request that hits the duplicate key reads the row: another owner → `rejected / OPID_CONFLICT`; final → `duplicate` with the stored result (including `reportId`); pending with a live lease → `retry / IN_PROGRESS`; pending with an expired lease (holder crashed, `RULES.syncLeaseMs` = 30 s) → taken over with an atomic `findOneAndUpdate` on `{status: pending, leaseUntil ≤ now}`. Re-applying after a takeover is safe because transitions dedupe on `missions.appliedOpIds` and observations on the unique `observations.opId`. Server errors and optimistic-concurrency losses delete the reservation instead of caching it, so only deterministic outcomes (applied, invalid transition, not found, validation) become the stored answer.
 
 ## Frontend
 Hash routing, no router library. One sync loop (on load, on `online`, and every 15 s). Every Field Mode action goes through the queue, online or offline. The service worker (Workbox via vite-plugin-pwa) precaches the app shell only; API responses aren't cached by the SW, because mission data lives in IndexedDB.

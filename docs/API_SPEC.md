@@ -20,13 +20,13 @@ Codes: `VALIDATION_ERROR` 400, `INVALID_JSON` 400, `CLOCK_SKEW` 400, `UNAUTHORIZ
 | `GET /missions?page&limit&status=a,b` | Paginated `{items, page, limit, total}` |
 | `GET /missions/:id` | |
 | `POST /missions/:id/start\|pause\|resume\|cancel` | Optional `{clientTs, currentStep}`. 409 on invalid transition |
-| `POST /missions/:id/complete` | Optional `{completionStatus, actualMinutes, rating, feedback, currentStep, clientTs}` → `{mission, reportId}` |
-| `POST /missions/:id/observations` | `{attribute, value, opId, clientTs}` → 201, or 200 with `duplicate: true` on a repeated opId. Returns the updated `evidence` |
+| `POST /missions/:id/complete` | Optional `{completionStatus, actualMinutes, rating, feedback, currentStep, clientTs}` → `{mission, reportId}`. Repeating it on a completed mission returns the same `reportId` (the body is ignored), rebuilding the report if a crash left it missing |
+| `POST /missions/:id/observations` | `{attribute, value, opId, clientTs}` → 201, or 200 with `duplicate: true` on a repeated opId. Returns the updated `evidence`. 409 `MISSION_NOT_ACTIVE` if the mission is not active/paused, including when a completion wins a race with it; a 201 observation is always in the report |
 | `GET /missions/:id/observations` | |
 | `POST /missions/:id/observations/parse` | `{text}` → proposed observations `{proposals, method: ai\|keywords, ...}`. **Nothing is saved, and the text is not stored** |
-| `POST /sync` | `{ops: [{opId, missionId, clientTs, type, payload?}]}` (≤ 50, applied in order) → `{results: [{opId, status: applied\|duplicate\|conflict\|rejected, result?, error?}]}` |
+| `POST /sync` | `{ops: [{opId, missionId, clientTs, type, payload?}]}` (≤ 50, applied in order) → `{results: [{opId, status: applied\|duplicate\|conflict\|rejected\|retry, result?, error?}]}` |
 | `GET /history?page&limit` | Completed and cancelled missions with report summaries |
-| `GET /reports/:id` | Completion report |
+| `GET /reports/:id` | Completion report. Rebuilt on read if the mission is completed but its report is missing |
 | `GET /preferences`, `PUT /preferences` | PUT takes the full object (strict) |
 | `GET /analytics/overview` | Counts plus `completionRate` / `averageMinutes`, which are `null` until 5 samples, with `insufficientData` |
 | `GET /analytics/attributes` | Per attribute: value counts, matched/differed counts, `expectationMatchRate` (`null` until 5 comparisons) |
@@ -34,7 +34,8 @@ Codes: `VALIDATION_ERROR` 400, `INVALID_JSON` 400, `CLOCK_SKEW` 400, `UNAUTHORIZ
 | `DELETE /me` | Deletes everything owned by the session and the session itself, then recomputes affected shared evidence |
 
 ## Sync semantics
-- Repeating an `opId` returns `duplicate` with the original result (e.g. the same `reportId`).
+- Each op is applied at most once per `opId`, even when requests race. Repeating an `opId` returns `duplicate` with the original result (e.g. the same `reportId`).
 - State ops are validated against the current server state. Invalid ones come back as `conflict` with the server's status in `details`. Nothing is silently dropped.
-- A server error (5xx) aborts the batch, so the client retries it. Ops that were already applied dedupe.
-- An opId used by another session → `rejected / OPID_CONFLICT`.
+- `retry` is transient: `IN_PROGRESS` (another request is applying the same opId right now) or `CONFLICT` (lost a concurrent write to the mission). Nothing is stored for it. Resend the same op later. It ends the batch: later ops get no result, so they're resent in order.
+- A server error (5xx) aborts the batch and stores nothing for the failing op, so the client retries it. Ops that were already applied dedupe.
+- An opId used by another session → `rejected / OPID_CONFLICT`. The other session's result is never returned.

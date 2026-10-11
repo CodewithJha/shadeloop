@@ -10,7 +10,7 @@ Statuses (as reported by `GET /api/v1/health/dependencies`): `NOT_CONFIGURED` (n
 - **Evidence:** all tests run against mongodb-memory-server (MongoDB binary). The production Docker image was also run against a `mongo:8` container (`mongodb: VERIFIED`). **Atlas itself was not tested** in this build (no URI available).
 
 ## Ollama + Gemma
-- **Role:** request parsing, mission proposals, note parsing, report summaries (advisory).
+- **Role:** request parsing, mission proposals, note parsing (advisory). Report summaries are template-only since 2026-10-11.
 - **Env:** `AI_PROVIDER=ollama`, `OLLAMA_URL`, `OLLAMA_MODEL` (default `gemma3:4b`).
 - **Verify:** health makes a live `GET /api/tags` and checks the model is installed. `lastCall` shows the latest generation outcome.
 - **Failure:** templates and keyword parsers take over; `fallbackUsed: true` with a reason.

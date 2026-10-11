@@ -84,6 +84,13 @@ export interface Dependency {
   lastCall?: { ok: boolean; at: string; detail: string } | null;
 }
 
+export interface HourlyReport {
+  hour: number;
+  attribute: string;
+  value: string;
+  reports: number;
+}
+
 export interface HistoryItem {
   mission: Mission;
   report: { id: string; summary: string; actualMinutes: number | null; observations: number } | null;
@@ -107,6 +114,8 @@ export const api = {
   deps: () => call<{ status: string; dependencies: Dependency[]; notImplemented: string[] }>('GET', '/health/dependencies', undefined, false),
   parseNote: (missionId: string, text: string) =>
     call<{ proposals: { attribute: string; value: string }[]; method: string; model: string | null; fallbackReason: string | null }>('POST', `/missions/${missionId}/observations/parse`, { text }),
+  hourly: (locationId: string) =>
+    call<{ available: boolean; hours: HourlyReport[] }>('GET', `/locations/${encodeURIComponent(locationId)}/hourly?tz=${encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone)}`),
   /** ElevenLabs audio for one step; throws when unavailable so the caller can use the browser voice. */
   speech: async (missionId: string, step: number) => {
     const res = await fetch(`/api/v1/missions/${missionId}/steps/${step}/speech`, { headers: { authorization: `Bearer ${await token()}` }, signal: AbortSignal.timeout(15_000) });

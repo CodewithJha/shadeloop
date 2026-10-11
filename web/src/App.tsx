@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type FormEvent } from 'react';
 import { CONDITIONS, MISSION_TYPES, type Condition, type Coords, type Mission, type SourceType } from '@shadeloop/shared';
-import { api, type HistoryItem, type PlanResponse } from './api.ts';
+import { api, type HistoryItem, type HourlyReport, type PlanResponse } from './api.ts';
 import { cacheMission, dismissOp, enqueue, flush, getCached, getMeta, listCached, listOps, refreshMission, resetStuck, retryFailed, retryOp, subscribe, updateLocal, type CachedMission, type QueuedOp } from './store.ts';
 import { Completion, FieldMode } from './Field.tsx';
 import { Settings } from './Settings.tsx';
@@ -404,6 +404,31 @@ function Discover() {
   );
 }
 
+/** Reports at this place by local hour of day, from the Tiger Data time-series mirror. Hidden when there are none. */
+function PlaceHours({ locationId }: { locationId: string }) {
+  const [hours, setHours] = useState<HourlyReport[]>([]);
+  useEffect(() => {
+    api
+      .hourly(locationId)
+      .then((r) => setHours(r.hours))
+      .catch(() => setHours([]));
+  }, [locationId]);
+  if (!hours.length) return null;
+  const byHour = Map.groupBy(hours, (h) => h.hour);
+  return (
+    <details>
+      <summary>Reports here by time of day (last 90 days, unverified)</summary>
+      <ul>
+        {[...byHour].map(([hour, rows]) => (
+          <li key={hour} className="num">
+            {String(hour).padStart(2, '0')}:00 · {rows.map((r) => `${label(r.attribute)}: ${label(r.value)} ×${r.reports}`).join(', ')}
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
 /* ---------------- Mission detail ---------------- */
 
 function MissionDetail({ id }: { id: string }) {
@@ -477,6 +502,7 @@ function MissionDetail({ id }: { id: string }) {
           <p className="hint">You will be asked to check these in the field. Your reports update the estimates for everyone.</p>
         </>
       )}
+      {online && m.selectedLocation && <PlaceHours locationId={m.selectedLocation.id} />}
       <h2>Safety</h2>
       <ul>
         {m.safetyNotes.map((s) => (

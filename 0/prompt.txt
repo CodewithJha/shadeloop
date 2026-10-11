@@ -1,0 +1,1 @@
+Fix GitHub issue #1 in this repo. The test "D: a concurrent burst cannot exceed the cap" in server/test/evidence.test.ts is flaky: it asserts ok > 0, but overObservationLimit in server/src/missions.ts documents that concurrent requests at the boundary may all be refused. Change only the test so it asserts the cap is never exceeded and allows ok >= 0. Then run: npm test -w server

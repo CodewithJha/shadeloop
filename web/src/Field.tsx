@@ -305,7 +305,9 @@ export function Completion({ id }: { id: string }) {
               {report
                 ? report.actual.minutes === null
                   ? 'unknown (start/end times were implausible)'
-                  : `${report.actual.minutes} (${report.actual.minutesSource === 'user' ? 'you entered' : 'from timestamps'})`
+                  : report.actual.minutesSource === 'user'
+                    ? `${report.actual.minutes} (your estimate${typeof report.actual.measuredMinutes === 'number' ? `; measured ${report.actual.measuredMinutes}` : ''})`
+                    : `${report.actual.minutes} (measured from start/end times)`
                 : deviceMinutes !== null
                   ? `~${deviceMinutes} (this device, includes pauses)`
                   : 'unknown'}

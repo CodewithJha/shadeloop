@@ -598,6 +598,14 @@ describe('durations', () => {
     expect((await finished(h, 5 * MIN, { actualMinutes: 0 })).actual).toMatchObject({ minutes: 0, minutesSource: 'user' });
   });
 
+  it('keeps the measured duration next to a user estimate and counts estimates in analytics', async () => {
+    const h = await session();
+    expect((await finished(h, 30 * MIN, { actualMinutes: 12 })).actual).toMatchObject({ minutes: 12, minutesSource: 'user', measuredMinutes: 30 });
+    expect((await finished(h, 20 * MIN)).actual).toMatchObject({ minutes: 20, minutesSource: 'timestamps', measuredMinutes: 20 });
+    const o = (await request(app).get(`${api}/analytics/overview`).set(h).expect(200)).body;
+    expect(o).toMatchObject({ totalMinutesOutside: 32, minutesSampleSize: 2, minutesUserEstimated: 1, minutesExcluded: 0 });
+  });
+
   it('keeps a long mission within the limit and marks an interrupted one unknown', async () => {
     const h = await session();
     expect((await finished(h, 200 * MIN)).actual).toMatchObject({ minutes: 200, minutesSource: 'timestamps' });

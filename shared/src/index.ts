@@ -290,7 +290,10 @@ export interface Report {
   actual: {
     /** `null` when timestamps gave an implausible duration (negative or over `MAX_ACTUAL_MINUTES`); never counted in analytics. */
     minutes: number | null;
+    /** `user`: the user's own estimate, not checked against the clock. `timestamps`: measured from start/end/pauses. */
     minutesSource: 'user' | 'timestamps';
+    /** Measured from timestamps even when the user gave an estimate (`null` when implausible). Absent on reports stored before 2026-10-11. */
+    measuredMinutes?: number | null;
     stepsReached: number;
     observations: { attribute: Attribute; value: string; observedAt: string }[];
   };

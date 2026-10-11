@@ -44,7 +44,12 @@ export async function analyticsOverview(ownerId: string) {
     col<MissionDoc>('missions').aggregate<{ _id: string; n: number }>([{ $match: { ownerId } }, { $group: { _id: '$status', n: { $sum: 1 } } }]).toArray(),
     col('observations').countDocuments({ ownerId }),
     col('reports').countDocuments({ ownerId }),
-    col('reports').aggregate<{ total: number; n: number }>([{ $match: trusted }, { $group: { _id: null, total: { $sum: '$actual.minutes' }, n: { $sum: 1 } } }]).toArray(),
+    col('reports')
+      .aggregate<{ total: number; n: number; user: number }>([
+        { $match: trusted },
+        { $group: { _id: null, total: { $sum: '$actual.minutes' }, n: { $sum: 1 }, user: { $sum: { $cond: [{ $eq: ['$actual.minutesSource', 'user'] }, 1, 0] } } } },
+      ])
+      .toArray(),
   ]);
   const missions = Object.fromEntries(['planned', 'active', 'paused', 'completed', 'cancelled'].map((s) => [s, statusRows.find((r) => r._id === s)?.n ?? 0]));
   const started = missions.active + missions.paused + missions.completed + missions.cancelled;
@@ -55,6 +60,8 @@ export async function analyticsOverview(ownerId: string) {
     observations: observationCount,
     totalMinutesOutside: minuteRows[0]?.total ?? 0,
     minutesSampleSize: timed,
+    /** How many of `minutesSampleSize` are the user's own estimates rather than measured. */
+    minutesUserEstimated: minuteRows[0]?.user ?? 0,
     minutesExcluded: reportCount - timed,
     completionRate: enough ? missions.completed / started : null,
     averageMinutes: timed >= RULES.minAnalyticsSamples ? Math.round(minuteRows[0].total / timed) : null,

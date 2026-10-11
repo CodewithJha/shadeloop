@@ -543,6 +543,7 @@ function History() {
             <dt>Minutes outside (from reports)</dt>
             <dd>
               {overview.totalMinutesOutside}
+              {overview.minutesUserEstimated > 0 && <span className="meta"> (includes {overview.minutesUserEstimated} of your own estimates)</span>}
               {overview.minutesExcluded > 0 && <span className="meta"> ({overview.minutesExcluded} without a reliable duration not counted)</span>}
             </dd>
             <dt>Completion rate</dt>

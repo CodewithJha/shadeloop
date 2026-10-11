@@ -579,6 +579,7 @@ async function buildReport(m: MissionDoc, id: string): Promise<ReportDoc> {
     actual: {
       minutes: actualMinutes,
       minutesSource: s.userMinutes !== null ? 'user' : 'timestamps',
+      measuredMinutes: computed,
       stepsReached: s.currentStep + 1,
       observations: obs.map((o) => ({ attribute: o.attribute, value: o.value, observedAt: o.clientTs })),
     },

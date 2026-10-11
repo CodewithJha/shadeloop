@@ -7,7 +7,7 @@ Anonymous sessions only. `POST /sessions` → `201 {token}`. Send `Authorization
 
 ## Errors
 `{ "error": { "code", "message", "details"?, "requestId" } }`. Every response also carries an `x-request-id` header.
-Codes: `VALIDATION_ERROR` 400, `INVALID_JSON` 400, `CLOCK_SKEW` 400, `UNAUTHORIZED` 401, `NOT_FOUND` 404, `INVALID_TRANSITION` / `MISSION_NOT_ACTIVE` / `CONFLICT` / `OPID_CONFLICT` 409, `PAYLOAD_TOO_LARGE` 413, `NO_FEASIBLE_MISSION` 422, `RATE_LIMITED` 429, `INTERNAL` 500, `DEPENDENCY_UNAVAILABLE` 503.
+Codes: `VALIDATION_ERROR` 400, `INVALID_JSON` 400, `CLOCK_SKEW` 400, `UNAUTHORIZED` 401, `NOT_FOUND` 404, `INVALID_TRANSITION` / `MISSION_NOT_ACTIVE` / `CONFLICT` / `OPID_CONFLICT` 409, `PAYLOAD_TOO_LARGE` 413, `NO_FEASIBLE_MISSION` 422, `RATE_LIMITED` 429 (transient), `OBSERVATION_LIMIT` 429 (permanent for that mission: `details {perMission, perAttribute}`; don't retry), `INTERNAL` 500, `DEPENDENCY_UNAVAILABLE` 503.
 
 ## Endpoints
 | Method & path | Notes |
@@ -21,7 +21,7 @@ Codes: `VALIDATION_ERROR` 400, `INVALID_JSON` 400, `CLOCK_SKEW` 400, `UNAUTHORIZ
 | `GET /missions/:id` | |
 | `POST /missions/:id/start\|pause\|resume\|cancel` | Optional `{clientTs, currentStep}`. 409 on invalid transition |
 | `POST /missions/:id/complete` | Optional `{completionStatus, actualMinutes, rating, feedback, currentStep, clientTs}` → `{mission, reportId}`. Repeating it on a completed mission returns the same `reportId` (the body is ignored), rebuilding the report if a crash left it missing |
-| `POST /missions/:id/observations` | `{attribute, value, opId, clientTs}` → 201, or 200 with `duplicate: true` on a repeated opId. Returns the updated `evidence`. 409 `MISSION_NOT_ACTIVE` if the mission is not active/paused, including when a completion wins a race with it; a 201 observation is always in the report |
+| `POST /missions/:id/observations` | `{attribute, value, opId, clientTs}` → 201, or 200 with `duplicate: true` on a repeated opId. Returns the updated `evidence`. 409 `MISSION_NOT_ACTIVE` if the mission is not active/paused, including when a completion wins a race with it; a 201 observation is always in the report. 429 `OBSERVATION_LIMIT` past 40 per mission or 10 per attribute (`RULES.observationLimits`) |
 | `GET /missions/:id/observations` | |
 | `POST /missions/:id/observations/parse` | `{text}` → proposed observations `{proposals, method: ai\|keywords, ...}`. **Nothing is saved, and the text is not stored** |
 | `POST /sync` | `{ops: [{opId, missionId, clientTs, type, payload?}]}` (≤ 50, applied in order) → `{results: [{opId, status: applied\|duplicate\|conflict\|rejected\|retry, result?, error?}]}` |
@@ -39,3 +39,7 @@ Codes: `VALIDATION_ERROR` 400, `INVALID_JSON` 400, `CLOCK_SKEW` 400, `UNAUTHORIZ
 - `retry` is transient: `IN_PROGRESS` (another request is applying the same opId right now) or `CONFLICT` (lost a concurrent write to the mission). Nothing is stored for it. Resend the same op later. It ends the batch: later ops get no result, so they're resent in order.
 - A server error (5xx) aborts the batch and stores nothing for the failing op, so the client retries it. Ops that were already applied dedupe.
 - An opId used by another session → `rejected / OPID_CONFLICT`. The other session's result is never returned.
+- An observation over the per-mission cap → `rejected / OBSERVATION_LIMIT`. It's final: a resend returns `duplicate` with `originalStatus: rejected`.
+
+## Condition checks and provenance
+`mission.conditionChecks[]` items: `{condition, required, attribute, status, confidence, estimate, provenance: unknown|user_report|aggregated, verification: unverified}`. Nothing is `verified` because no verified source is integrated. `whyItMatches[].sourceType` can be `external_map_data` (OSM/SerpApi place mapping), `user_report`, `aggregated`, `inferred` or `ai_suggestion`. `verified_external` is reserved and not emitted. Accessibility conditions (`step_free`, `bench`, `smooth_path`) always add an "unverified" line to `uncertainty`. See DOMAIN_MODEL.md.

@@ -11,7 +11,7 @@ Completion report summaries are not AI-written: completion must not wait on a mo
 - Write to the database. Only server code writes, after validation.
 - Decide safety. Safety notes and unsafe-text rejection are deterministic (`RULES.unsafePatterns`, `RULES.baseSafetyNotes`).
 - Invent places. `locationId` must be one of the supplied candidates or null, otherwise the candidate is rejected.
-- Invent weather or conditions. Weather comes from Open-Meteo, and conditions come from the evidence model.
+- Invent weather or conditions. Weather comes from Open-Meteo, and conditions come from the evidence model. The evidence the model sees is labelled as unverified anonymous reports with their count (e.g. `yes (moderate, 3 unverified anonymous reports)`). Whatever the model writes, the server adds the accessibility "unverified" notices itself.
 - Override the constraint engine. Every AI candidate goes through `validateCandidate`. The only adjustment the engine makes is shortening step minutes proportionally to fit the time budget, which is reported in `uncertainty`.
 
 ## Mechanics (`server/src/ai.ts`)
@@ -21,7 +21,7 @@ Completion report summaries are not AI-written: completion must not wait on a mo
 - Fallback reasons never echo model output (JSON syntax errors become "malformed JSON").
 
 ## Labelling
-Every mission carries `provenance{generator: ai|template, provider, model, fallbackUsed, fallbackReason}`. Every "why it fits" line carries a `sourceType`, and AI text is always `ai_suggestion`. Reports label the summary generator. The UI shows these labels on every card.
+Every mission carries `provenance{generator: ai|template, provider, model, fallbackUsed, fallbackReason}`. Every "why it fits" line carries a `sourceType`, and AI text is always `ai_suggestion`. Place-mapping lines are `external_map_data`, never `verified_external`. Reports label the summary generator. The UI shows these labels on every card.
 
 ## Known behaviour (observed locally with gemma3:4b)
 - It often overshoots the time budget (e.g. 34 min for a 25 min request). The engine shortens or rejects it, then falls back to templates.

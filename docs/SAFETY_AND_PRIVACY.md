@@ -7,6 +7,8 @@
 - A location whose *required* condition (e.g. step-free) is contradicted by field evidence is never selected. Unknown conditions are shown as unknown.
 - Walking limits and step-free/seating needs from preferences are enforced by the engine.
 - The app never claims a place is safe, open, accessible or shaded based on search results.
+- **Accessibility honesty.** Step-free access, seating and path condition come only from anonymous field reports. Sessions are free to create and nobody's presence is checked, so a few sessions can make a place look "supported". No verified accessibility source is integrated (OSM `wheelchair` tags are not used), so nothing is labelled verified. Every accessibility condition, required or preferred, carries `verification: unverified` and an explicit line in "What we don't know" telling the user to check access themselves, even when reports agree. Place listings from OpenStreetMap are labelled "map data", not "verified".
+- One session's reports count once per place and attribute, and each mission accepts at most 40 observations (10 per attribute), so one session can't flood away other reports.
 
 ## Privacy
 - **Location:** opt-in only, requested once through the browser and rounded to 2 decimals (about 1 km) on the device. It is stored in IndexedDB on the device and sent only with a plan request, where the server rounds it again before calling Overpass or Open-Meteo. There is no continuous GPS. The server does not store the user's coordinates; it stores only the coordinates of public mapped places.

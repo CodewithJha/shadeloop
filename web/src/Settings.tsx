@@ -59,7 +59,7 @@ export function Settings() {
         const c = { lat: Math.round(pos.coords.latitude * 100) / 100, lon: Math.round(pos.coords.longitude * 100) / 100 };
         await setMeta('coarse', c);
         setCoarse(c);
-        set({ privacy: { useCoarseLocation: true } });
+        set({ privacy: { ...prefs.privacy, useCoarseLocation: true } });
         setLocMsg('Approximate location saved on this device. Save preferences to record your consent.');
       },
       (err) => setLocMsg(`Location not available: ${err.message}`),
@@ -70,7 +70,7 @@ export function Settings() {
   async function forgetLocation() {
     await delMeta('coarse');
     setCoarse(undefined);
-    set({ privacy: { useCoarseLocation: false } });
+    set({ privacy: { ...prefs.privacy, useCoarseLocation: false } });
     setLocMsg('Location removed from this device.');
   }
 
@@ -156,7 +156,7 @@ export function Settings() {
           <legend>Voice</legend>
           <label className="check">
             <input type="checkbox" checked={prefs.voice.readStepsAloud} onChange={(e) => set({ voice: { ...prefs.voice, readStepsAloud: e.target.checked } })} />
-            Offer “read step aloud” (browser speech synthesis)
+            Offer “read step aloud” (ElevenLabs voice when online, browser voice offline)
           </label>
           <label className="check">
             <input type="checkbox" checked={prefs.voice.voiceNotes} onChange={(e) => set({ voice: { ...prefs.voice, voiceNotes: e.target.checked } })} />
@@ -166,6 +166,13 @@ export function Settings() {
           <select id="lang" value={prefs.language} disabled>
             <option value="en">English (only language available)</option>
           </select>
+        </fieldset>
+        <fieldset>
+          <legend>Memory</legend>
+          <label className="check">
+            <input type="checkbox" checked={prefs.privacy.rememberRequests} onChange={(e) => set({ privacy: { ...prefs.privacy, rememberRequests: e.target.checked } })} />
+            Remember my requests so future plans respect what I said (stored with Backboard; deleted with “Delete my data”)
+          </label>
         </fieldset>
         <button className="primary" type="submit" disabled={!online}>
           Save preferences

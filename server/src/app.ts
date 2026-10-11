@@ -15,7 +15,7 @@ import {
   ObservationInput,
   PlanRequest,
   Preferences,
-  SyncRequest,
+  SyncEnvelope,
   TransitionPayload,
   type MissionAction,
 } from '@shadeloop/shared';
@@ -216,7 +216,7 @@ export function createApp() {
   });
 
   api.post('/sync', async (req, res) => {
-    const { ops, sentAt } = parse(SyncRequest, req.body);
+    const { ops, sentAt } = parse(SyncEnvelope, req.body);
     res.json({ results: await sync(owner(res), ops, sentAt) });
   });
 

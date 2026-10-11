@@ -12,7 +12,8 @@ import {
   type MissionAction,
   type PlanRequest,
   type Report,
-  type SyncOp,
+  SyncOp,
+  type SyncEnvelope,
   type SyncResult,
   type WeatherView,
 } from '@shadeloop/shared';
@@ -664,7 +665,8 @@ type SyncRecord = {
   ownerId: string;
   entityType: 'mission' | 'observation';
   entityId: string;
-  opType: SyncOp['type'];
+  /** A `SyncOp` type, or whatever an op refused as invalid claimed to be. */
+  opType: string;
   clientTs: string;
   serverTs: Date;
   /** `pending` while one request holds the lease and applies the op; anything else is the final answer. */
@@ -704,8 +706,10 @@ async function applyOp(
 
 const syncRecords = () => col<SyncRecord>('sync_records');
 
+type EnvelopeOp = z.infer<typeof SyncEnvelope>['ops'][number];
+
 /** Claim an opId before applying it: returns our lease, or the answer to send instead (stored result, foreign opId, or still in progress). */
-async function reserve(ownerId: string, op: SyncOp): Promise<string | SyncResult> {
+async function reserve(ownerId: string, op: EnvelopeOp): Promise<string | SyncResult> {
   const lease = randomUUID();
   const leaseUntil = () => new Date(Date.now() + RULES.syncLeaseMs);
   try {
@@ -745,8 +749,11 @@ async function reserve(ownerId: string, op: SyncOp): Promise<string | SyncResult
  * op and abort the batch so the client retries; a `retry` result stops the batch too, so later ops never run out of order.
  * One clock offset (from `sentAt`) applies to the whole batch, so ops keep their order and spacing. An op's times are
  * fixed when it is first applied; a resend with a later `sentAt` returns the stored result.
+ * An op that fails `SyncOp` validation is `rejected / VALIDATION_ERROR` (stored, like other refusals); the others still
+ * run. Each op is judged against the mission's current state, so a refused op doesn't hold back later ops here: those
+ * that depended on it get their own refusal from the state machine.
  */
-export async function sync(ownerId: string, ops: SyncOp[], sentAt?: string): Promise<SyncResult[]> {
+export async function sync(ownerId: string, ops: EnvelopeOp[], sentAt?: string): Promise<SyncResult[]> {
   const offsetMs = clockOffset(sentAt);
   const results: SyncResult[] = [];
   for (const op of ops) {
@@ -758,7 +765,13 @@ export async function sync(ownerId: string, ops: SyncOp[], sentAt?: string): Pro
     }
     let res: Awaited<ReturnType<typeof applyOp>>;
     try {
-      res = await applyOp(ownerId, op, offsetMs);
+      const parsed = SyncOp.safeParse(op);
+      res = parsed.success
+        ? await applyOp(ownerId, parsed.data, offsetMs)
+        : {
+            status: 'rejected',
+            error: { code: 'VALIDATION_ERROR', message: 'Invalid op', details: parsed.error.issues.map((i) => ({ path: i.path.join('.'), message: i.message })) },
+          };
     } catch (e) {
       await syncRecords().deleteOne({ opId: op.opId, lease });
       throw e;

@@ -153,6 +153,20 @@ describe('queue ordering', () => {
     expect(await states()).toEqual(['start:synced', 'observation:synced']);
   });
 
+  it('turns a per-op VALIDATION_ERROR into a conflict for that op only; other missions sync and later ops stay held', async () => {
+    const bad = await enqueue({ type: 'complete', missionId: 'm1', payload: { completionStatus: 'completed', actualMinutes: 300 } });
+    const other = await obs('m2');
+    await flush(async (ops) =>
+      ops.map((o) => (o.opId === bad.opId ? { opId: o.opId, status: 'rejected', error: { code: 'VALIDATION_ERROR', message: 'Invalid op' } } : { opId: o.opId, status: 'applied' })),
+    );
+    expect(await states()).toEqual(['complete:conflict', 'observation:synced']);
+    expect((await listOps()).find((q) => q.opId === other.opId)!.state).toBe('synced');
+    await obs();
+    const send = vi.fn(async (ops: SyncOp[]) => applied(ops));
+    await flush(send);
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it('stops after a server retry mid-batch and resends the rest in order', async () => {
     const [a, b, c] = [await enqueue({ type: 'start', missionId: 'm1' }), await obs(), await obs()];
     await flush(async () => [

@@ -124,6 +124,13 @@ export const SyncOp = z.discriminatedUnion('type', [
 ]);
 export type SyncOp = z.infer<typeof SyncOp>;
 export const SyncRequest = z.object({ ops: z.array(SyncOp).min(1).max(50), sentAt }).strict();
+/**
+ * What the server checks on the whole `/sync` request: each op's identity and time. The rest of each op is checked
+ * against `SyncOp` one by one, so one op an older client built (e.g. a value it allowed) is refused alone.
+ */
+export const SyncEnvelope = z
+  .object({ ops: z.array(z.looseObject({ opId: z.uuid(), missionId: z.string().max(100), clientTs: isoDate, type: z.string().max(20) })).min(1).max(50), sentAt })
+  .strict();
 
 export const NoteParseRequest = z.object({ text: z.string().trim().min(1).max(1000) }).strict();
 

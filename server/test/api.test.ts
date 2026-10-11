@@ -387,6 +387,55 @@ describe('offline sync', () => {
       .expect(200);
     expect(r.body.results[0]).toMatchObject({ status: 'rejected', error: { code: 'CLOCK_SKEW' } });
   });
+  it('refuses an invalid op on its own (e.g. from an older client) and applies the rest of the batch', async () => {
+    const h = await session();
+    const [a] = (await plan(h)).missions;
+    const [b] = (await plan(h)).missions;
+    const op = (missionId: string, type: string, payload?: object) => ({ opId: uuid(), missionId, clientTs: now(), type, ...(payload ? { payload } : {}) });
+    const ops = [
+      op(a.id, 'start'),
+      op(b.id, 'start'),
+      op(a.id, 'complete', { actualMinutes: 300 }), // allowed by an older client, over today's 240 cap
+      op(b.id, 'observation', { attribute: 'crowding', value: 'purple' }),
+      op(b.id, 'observation', { attribute: 'crowding', value: 'busy' }),
+      op(b.id, 'teleport'),
+      op(b.id, 'complete', { actualMinutes: 10 }),
+    ];
+    const first = await syncBody(h, { ops, sentAt: now() }).expect(200);
+    const summary = (r: { status: string; error?: { code: string } }) => [r.status, r.error?.code ?? null];
+    expect(first.body.results.map(summary)).toEqual([
+      ['applied', null],
+      ['applied', null],
+      ['rejected', 'VALIDATION_ERROR'],
+      ['rejected', 'VALIDATION_ERROR'],
+      ['applied', null],
+      ['rejected', 'VALIDATION_ERROR'],
+      ['applied', null],
+    ]);
+    expect(first.body.results[2].error.details).toEqual([expect.objectContaining({ path: 'payload.actualMinutes' })]);
+    expect((await getMission(h, a.id)).status).toBe('active');
+    const report = await reportOf(h, first.body.results[6].result.reportId);
+    expect(report.actual.observations).toEqual([expect.objectContaining({ attribute: 'crowding', value: 'busy' })]);
+
+    // A resend is answered from the stored results, refusals included.
+    const again = await syncBody(h, { ops, sentAt: now() }).expect(200);
+    expect(again.body.results.map((r: { status: string }) => r.status)).toEqual(Array(7).fill('duplicate'));
+    expect(again.body.results[2]).toMatchObject({ result: { originalStatus: 'rejected' }, error: { code: 'VALIDATION_ERROR' } });
+    expect(await col('sync_records').countDocuments({ opId: { $in: ops.map((o) => o.opId) } })).toBe(7);
+
+    // The refused completion can be redone with a valid value under a new opId.
+    const redo = await syncBody(h, { ops: [op(a.id, 'complete', { actualMinutes: 240 })] }).expect(200);
+    expect(redo.body.results[0].status).toBe('applied');
+  });
+  it('still refuses a malformed batch envelope with 400', async () => {
+    const h = await session();
+    const [m] = (await plan(h)).missions;
+    const op = { opId: uuid(), missionId: m.id, clientTs: now(), type: 'start' };
+    for (const body of [{}, { ops: [] }, { ops: 'x' }, { ops: [{ ...op, opId: 'not-a-uuid' }] }, { ops: [{ ...op, type: undefined }] }, { ops: [op], extra: 1 }, { ops: Array(51).fill(op) }]) {
+      expect((await syncBody(h, body).expect(400)).body.error.code).toBe('VALIDATION_ERROR');
+    }
+    expect((await getMission(h, m.id)).status).toBe('planned');
+  });
 });
 
 const MIN = 60_000;

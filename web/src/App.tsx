@@ -4,6 +4,7 @@ import { api, type HistoryItem, type PlanResponse } from './api.ts';
 import { cacheMission, dismissOp, enqueue, flush, getCached, getMeta, listCached, listOps, refreshMission, resetStuck, retryFailed, retryOp, subscribe, updateLocal, type CachedMission, type QueuedOp } from './store.ts';
 import { Completion, FieldMode } from './Field.tsx';
 import { Settings } from './Settings.tsx';
+import { canOfferUpdate } from './update.ts';
 
 export const label = (s: string) => s.replace(/_/g, ' ');
 export const go = (path: string) => {
@@ -604,9 +605,28 @@ function useRoute() {
   return hash.replace(/^#/, '') || '/';
 }
 
-export function App() {
+/** Typed or toggled form input not yet submitted. Leaving the screen discards it anyway, so a route change clears it. */
+function useDirty() {
+  const [dirty, setDirty] = useState(false);
+  useEffect(() => {
+    const on = () => setDirty(true);
+    const off = () => setDirty(false);
+    addEventListener('input', on, true);
+    addEventListener('submit', off, true);
+    addEventListener('hashchange', off);
+    return () => {
+      removeEventListener('input', on, true);
+      removeEventListener('submit', off, true);
+      removeEventListener('hashchange', off);
+    };
+  }, []);
+  return dirty;
+}
+
+export function App({ onUpdate }: { onUpdate?: () => void }) {
   const sync = useSyncLoop();
   const route = useRoute();
+  const dirty = useDirty();
   const mainRef = useRef<HTMLElement>(null);
   useEffect(() => mainRef.current?.focus(), [route]);
   const [, page, id] = route.split('/');
@@ -640,6 +660,14 @@ export function App() {
         </div>
       </header>
       <main id="main" ref={mainRef} tabIndex={-1}>
+        {onUpdate && canOfferUpdate(route, dirty) && (
+          <p className="notice row" role="status">
+            <span style={{ flex: '1 1 12rem' }}>A new version of ShadeLoop is ready. Unsynced changes stay on this device.</span>
+            <button type="button" onClick={onUpdate}>
+              Reload
+            </button>
+          </p>
+        )}
         <SyncProblems />
         {page === 'm' && id ? (
           <MissionDetail id={id} />

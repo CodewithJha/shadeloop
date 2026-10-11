@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: shadeloop
+    runtime: node
+    plan: free
+    # Dev dependencies (vite) are needed to build the PWA even though NODE_ENV=production.
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      - key: NODE_ENV
+        value: production
+      - key: TRUST_PROXY
+        value: "1"
+      - key: MONGODB_URI
+        sync: false # MongoDB Atlas connection string
+      - key: MONGODB_DB
+        value: shadeloop
+      - key: AI_PROVIDER
+        value: none # set to "openai" and fill the three OPENAI_* vars for a hosted model
+      - key: OPENAI_BASE_URL
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        sync: false
+      - key: DISCOVERY_MODE
+        value: live
+      - key: SERPAPI_KEY
+        sync: false

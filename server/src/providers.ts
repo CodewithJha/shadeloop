@@ -236,3 +236,22 @@ export async function getWeather(rawOrigin: Coords): Promise<WeatherView> {
     return { available: false, source: 'open-meteo', retrievedAt: new Date().toISOString(), reason };
   }
 }
+
+/** ElevenLabs text to speech (MP3). Step texts repeat across users, so audio is cached like other provider results. */
+export async function speak(text: string): Promise<Buffer> {
+  try {
+    const audio = await cached(`tts:${text}`, async () => {
+      const res = await fetchOk('ElevenLabs', `https://api.elevenlabs.io/v1/text-to-speech/${env.ELEVENLABS_VOICE_ID}?output_format=mp3_44100_64`, {
+        method: 'POST',
+        headers: { 'xi-api-key': env.ELEVENLABS_API_KEY!, 'content-type': 'application/json' },
+        body: JSON.stringify({ text, model_id: 'eleven_flash_v2_5' }),
+      });
+      return Buffer.from(await res.arrayBuffer());
+    });
+    recordCall('elevenlabs', true, 'speech returned');
+    return audio;
+  } catch (e) {
+    recordCall('elevenlabs', false, errorText(e));
+    throw e;
+  }
+}

@@ -244,3 +244,44 @@ describe('process startup', () => {
     expect(r.stdout + r.stderr).not.toContain('s3cret-pw');
   });
 });
+
+describe('ElevenLabs step speech', () => {
+  const mp3 = new Uint8Array([0x49, 0x44, 0x33]);
+  afterEach(() => {
+    delete env.ELEVENLABS_API_KEY;
+  });
+  async function mission() {
+    const token = (await request(app).post(`${api}/sessions`).send({})).body.token as string;
+    const plan = await request(app).post(`${api}/missions/plan`).set('authorization', `Bearer ${token}`).send({ availableMinutes: 15 });
+    return { token, m: plan.body.missions[0] as { id: string; steps: { text: string }[] } };
+  }
+
+  it('is 404 without a key, speaks only the stored step text, caches it, and maps outages to 503', async () => {
+    const { token, m } = await mission();
+    const get = (id: string, n: number, t = token) => request(app).get(`${api}/missions/${id}/steps/${n}/speech`).set('authorization', `Bearer ${t}`);
+    expect((await get(m.id, 0)).body.error.code).toBe('NOT_CONFIGURED');
+
+    env.ELEVENLABS_API_KEY = 'test-key';
+    let sent: unknown;
+    routes = (url, init) => {
+      if (!url.startsWith('https://api.elevenlabs.io/v1/text-to-speech/')) throw new Error(`unexpected ${url}`);
+      sent = JSON.parse(String(init?.body));
+      return new Response(mp3, { status: 200, headers: { 'content-type': 'audio/mpeg' } });
+    };
+    const ok = await get(m.id, 0);
+    expect(ok.status).toBe(200);
+    expect(ok.headers['content-type']).toMatch(/^audio\/mpeg/);
+    expect(sent).toMatchObject({ text: m.steps[0].text });
+    await get(m.id, 0);
+    expect(calls.filter((u) => u.includes('elevenlabs')).length).toBe(1);
+    expect(lastCall('elevenlabs')?.ok).toBe(true);
+
+    expect((await get(m.id, 99)).status).toBe(404);
+    const other = await mission();
+    expect((await get(m.id, 0, other.token)).status).toBe(404);
+
+    routes = () => new Response('no', { status: 401 });
+    expect((await get(m.id, 1)).status).toBe(503);
+    expect(lastCall('elevenlabs')?.ok).toBe(false);
+  });
+});

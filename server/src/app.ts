@@ -27,7 +27,7 @@ import { pingDb } from './db.ts';
 import { aiHealth, aiParseNote } from './ai.ts';
 import { lastCall, statusFrom } from './integrations.ts';
 import { keywordObservations } from './fallback.ts';
-import { discover } from './providers.ts';
+import { discover, speak } from './providers.ts';
 import { analyticsAttributes, analyticsOverview, createOwner, deleteData, exportData, getPrefs, ownerFromToken, putPrefs } from './account.ts';
 import { addObservation, clockOffset, getMission, getReport, history, listMissions, listObservations, missionView, planMissions, sync, transition } from './missions.ts';
 import { openapi } from './openapi.ts';
@@ -52,7 +52,7 @@ const Page = z.object({
 });
 const CompleteBody = CompletePayload.extend({ clientTs: TransitionPayload.shape.clientTs, sentAt: TransitionPayload.shape.sentAt });
 
-const NOT_IMPLEMENTED = ['elevenlabs', 'tiger-data', 'mastra', 'temporal', 'backboard', 'tabpfn'];
+const NOT_IMPLEMENTED = ['tiger-data', 'mastra', 'temporal', 'backboard', 'tabpfn'];
 
 const owner = (res: Response) => res.locals.ownerId as string;
 
@@ -78,7 +78,7 @@ export function createApp() {
     }),
   );
   // Outside production the app may be opened over plain HTTP on a LAN address, where upgrading requests breaks it.
-  app.use(helmet({ contentSecurityPolicy: { directives: { upgradeInsecureRequests: env.NODE_ENV === 'production' ? [] : null } } }));
+  app.use(helmet({ contentSecurityPolicy: { directives: { mediaSrc: ["'self'", 'blob:'], upgradeInsecureRequests: env.NODE_ENV === 'production' ? [] : null } } }));
 
   const limitHandler = (_req: Request, _res: Response, next: NextFunction) => next(new AppError(429, 'RATE_LIMITED', 'Too many requests, slow down'));
   const limiter = (limit: number) => rateLimit({ windowMs: 60_000, limit, standardHeaders: 'draft-8', legacyHeaders: false, handler: limitHandler });
@@ -136,6 +136,13 @@ export function createApp() {
         role: 'Agent tracing (planner, tool and model spans) and 5xx errors',
         status: Sentry.getClient() ? 'CONFIGURED' : 'NOT_CONFIGURED',
         detail: Sentry.getClient() ? 'SDK initialised; spans carry counts and model names, never prompts or locations' : 'Set SENTRY_DSN to enable',
+      },
+      {
+        name: 'elevenlabs',
+        role: 'Natural voice for reading steps aloud (browser voice is the offline fallback)',
+        status: statusFrom({ name: 'elevenlabs', enabled: true, configured: Boolean(env.ELEVENLABS_API_KEY), needsConfig: true }),
+        detail: env.ELEVENLABS_API_KEY ? 'Key present. Status reflects the last real call.' : 'Set ELEVENLABS_API_KEY to enable',
+        lastCall: lastCall('elevenlabs'),
       },
       { name: 'web-speech', role: 'Optional voice notes and step read-out (browser APIs)', status: 'IMPLEMENTED', detail: 'Runs in the browser where supported; not checked by the server' },
     ];
@@ -206,6 +213,18 @@ export function createApp() {
       fallbackUsed: !ai.data,
       fallbackReason: ai.meta.fallbackReason,
     });
+  });
+
+  // Speaks a step of the caller's own mission, never arbitrary text, so the voice budget can't be spent on anything else.
+  api.get('/missions/:id/steps/:n/speech', expensive, async (req, res) => {
+    if (!env.ELEVENLABS_API_KEY) throw new AppError(404, 'NOT_CONFIGURED', 'ElevenLabs is not configured; use the browser voice');
+    const m = await getMission(owner(res), parse(Id, req.params.id));
+    const step = m.steps[parse(z.coerce.number().int().min(0), req.params.n)];
+    if (!step) throw new AppError(404, 'NOT_FOUND', 'No such step');
+    const audio = await speak(step.text).catch(() => {
+      throw new AppError(503, 'DEPENDENCY_UNAVAILABLE', 'ElevenLabs is unavailable; use the browser voice');
+    });
+    res.type('audio/mpeg').set('cache-control', 'private, max-age=86400').send(audio);
   });
 
   api.post('/missions/:id/:action', async (req, res) => {

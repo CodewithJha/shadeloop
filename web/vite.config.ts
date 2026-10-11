@@ -8,6 +8,8 @@ export default defineConfig({
     VitePWA({
       // A new version waits until the user taps "Reload" (see main.tsx), so it never interrupts Field Mode or a form.
       registerType: 'prompt',
+      // The icons are already in the precache via globPatterns.
+      includeManifestIcons: false,
       manifest: {
         name: 'ShadeLoop',
         short_name: 'ShadeLoop',

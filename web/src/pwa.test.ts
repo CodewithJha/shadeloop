@@ -44,5 +44,8 @@ describe('production build', () => {
     expect(sw).toMatch(/denylist:\s*\[\/\^\\\/api\\\/\/\]/);
     expect(sw).not.toMatch(/registerRoute\((?!new \w+\.NavigationRoute)/);
     expect(sw).not.toMatch(/url"?:\s*"\/?api\//);
+    const urls = [...sw.matchAll(/url"?:\s*"([^"]+)"/g)].map((m) => m[1]);
+    expect(urls).toContain('icon-512.png');
+    expect(new Set(urls).size).toBe(urls.length);
   });
 });

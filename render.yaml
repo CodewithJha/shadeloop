@@ -3,6 +3,7 @@ services:
     name: shadeloop
     runtime: node
     plan: free
+    region: singapore
     # Dev dependencies (vite) are needed to build the PWA even though NODE_ENV=production.
     buildCommand: npm ci --include=dev && npm run build
     startCommand: npm start
@@ -21,14 +22,22 @@ services:
       - key: MONGODB_DB
         value: shadeloop
       - key: AI_PROVIDER
-        value: none # set to "openai" and fill the three OPENAI_* vars for a hosted model
+        value: openai # Gemma 4 through Google AI Studio's OpenAI-compatible endpoint; "none" uses templates only
       - key: OPENAI_BASE_URL
-        sync: false
-      - key: OPENAI_API_KEY
-        sync: false
+        value: https://generativelanguage.googleapis.com/v1beta/openai
       - key: OPENAI_MODEL
-        sync: false
+        value: gemma-4-26b-a4b-it
+      - key: OPENAI_API_KEY
+        sync: false # Google AI Studio key
       - key: DISCOVERY_MODE
         value: live
       - key: SERPAPI_KEY
+        sync: false
+      - key: SENTRY_DSN
+        sync: false
+      - key: ELEVENLABS_API_KEY
+        sync: false
+      - key: TIGER_DATABASE_URL
+        sync: false
+      - key: BACKBOARD_API_KEY
         sync: false

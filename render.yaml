@@ -12,6 +12,8 @@ services:
         value: "24"
       - key: NODE_ENV
         value: production
+      - key: MONGOMS_DISABLE_POSTINSTALL # skip the test-only mongod download (~100 MB) during npm ci
+        value: "1"
       - key: TRUST_PROXY
         value: "1"
       - key: MONGODB_URI

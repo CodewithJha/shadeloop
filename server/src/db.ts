@@ -52,7 +52,8 @@ type CollectionName =
   | 'evidence'
   | 'locations';
 
-async function ensureIndexes(d: Db) {
+/** Runs at every start; creating an index that already exists with the same spec is a no-op. Never drops anything. */
+export async function ensureIndexes(d: Db) {
   const day = 86_400;
   await Promise.all([
     d.collection('owners').createIndex({ tokenHash: 1 }, { unique: true }),
@@ -66,6 +67,7 @@ async function ensureIndexes(d: Db) {
     d.collection('reports').createIndex({ missionId: 1 }, { unique: true }),
     d.collection('reports').createIndex({ ownerId: 1, createdAt: -1 }),
     d.collection('sync_records').createIndex({ opId: 1 }, { unique: true }),
+    d.collection('sync_records').createIndex({ ownerId: 1 }),
     d.collection('sync_records').createIndex({ serverTs: 1 }, { expireAfterSeconds: RULES.syncRecordTtlDays * day }),
     d.collection('evidence').createIndex({ locationId: 1, attribute: 1 }, { unique: true }),
   ]);

@@ -34,7 +34,8 @@ const Env = z
   });
 
 function loadEnv() {
-  const parsed = Env.safeParse(process.env);
+  // Treat empty values (e.g. `SERPAPI_KEY=` copied from .env.example) as unset.
+  const parsed = Env.safeParse(Object.fromEntries(Object.entries(process.env).filter(([, v]) => v !== '')));
   if (!parsed.success) {
     // Print field names and messages only, never values.
     for (const issue of parsed.error.issues) console.error(`Invalid env ${issue.path.join('.')}: ${issue.message}`);

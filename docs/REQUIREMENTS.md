@@ -13,13 +13,14 @@ Status: ✅ implemented and tested · 🟡 implemented, manually verified only �
 | F6 | Completion report: planned vs actual, comparisons, summary with provider metadata, evidence refs | ✅ |
 | F7 | Deterministic evidence model (unknown/low/moderate/conflicting/stale) | ✅ |
 | F8 | Offline Field Mode, IndexedDB op queue, idempotent batch sync with per-op conflicts | ✅ (unit and API tests) / 🟡 (browser offline and reload checked manually) |
-| F9 | Discovery via Overpass, SerpApi (key), labelled fixture mode | ✅ Overpass live-verified · 🟡 SerpApi untested (no key) |
+| F9 | Discovery via Overpass, SerpApi (key), labelled fixture mode | ✅ Overpass live-verified · 🟡 SerpApi not verified live |
 | F10 | Weather via Open-Meteo with source and timestamp, "unavailable" otherwise | ✅ live-verified |
 | F11 | Integration status registry in `/health/dependencies` and Settings | ✅ |
 | F12 | History and analytics computed from Mongo, insufficient data instead of invented numbers | ✅ |
 | F13 | Preferences GET/PUT, data export, delete-my-data (recomputes shared evidence) | ✅ |
-| F14 | Voice: browser speech recognition for notes, speech synthesis for steps | 🟡 (code present; not exercised in automated tests) |
-| F15 | ElevenLabs, Sentry, Tiger Data, Mastra, Temporal, Backboard, TabPFN | ❌ (see INTEGRATIONS.md) |
+| F14 | Voice: browser speech recognition for notes; ElevenLabs step voice with browser speech synthesis as fallback | 🟡 (ElevenLabs verified live; browser paths not exercised in automated tests) |
+| F15 | Sentry agent tracing, Tiger Data time-of-day mirror, opt-in Backboard memory | 🟡 verified live (see INTEGRATIONS.md) |
+| F16 | Mastra, Temporal, TabPFN | ❌ not implemented |
 
 ## Non-functional
 | ID | Requirement | Status |

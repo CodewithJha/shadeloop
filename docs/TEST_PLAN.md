@@ -1,6 +1,6 @@
 # Test plan
 
-Run everything: `npm run lint && npm run typecheck && npm test && npm run build`. Current counts: 117 server tests, 38 web tests on Node 26.10 locally (the earlier 116/35 also passed on Node 24.21, the production target; the new tests were run on 26.10 only).
+Run everything: `npm run lint && npm run typecheck && npm test && npm run build`. Current counts: 121 server tests, 38 web tests on Node 26.10 locally (the earlier 116/35 also passed on Node 24.21, the production target; the new tests were run on 26.10 only).
 
 ## Server unit tests (`server/test/unit.test.ts`)
 - State machine: allowed and rejected transitions.
@@ -64,5 +64,8 @@ Re-run later the same day on the production build served by the API: one observa
 - Docker: the image builds and runs with `NODE_ENV=production` against a `mongo:8` container. Health, the PWA and fixture planning worked, and `MONGODB_URI=memory` was refused.
 - Docker, again after the deployment changes (built with `--no-cache` from a clean export of the tree): 271 MB, runtime `node_modules` 24 MB with no react/react-dom/idb/vite/mongodb-memory-server, no `.env` in the image, user `node`. Against `mongo:8`: `HEALTHCHECK` reported `healthy`, `mongodb: VERIFIED`, `sync_records.ownerId_1` created, production CSP includes `upgrade-insecure-requests`, a `/sync` batch with an `actualMinutes: 500` complete returned `applied` + `rejected / VALIDATION_ERROR`; `docker stop` logged `SIGTERM` → `shutdown complete`, exit 0. `MONGODB_URI=memory` → exit 1; unreachable Mongo → `startup failed: …` (host only), exit 1.
 
+## Partner integrations (2026-10-11)
+Automated (mocked): Gemma 4 `<thought>` stripping, the ElevenLabs speech endpoint, the Tiger hourly endpoint without a URL and its time-zone check, and Backboard memory. Verified live by hand: Gemma 4 on AI Studio, Atlas, Sentry agent traces, ElevenLabs audio, Tiger Data writes and reads, Backboard recall and save.
+
 ## Not covered
-Playwright browser e2e (not added), screen-reader pass, Web Speech paths, Atlas, SerpApi, OpenAI-compatible provider, Render. In a browser: the PWA update prompt, install on Android/iOS, and the mobile layout fixes of 2026-10-11 (only Discover at 320×640 was looked at before them).
+Playwright browser e2e (not added), screen-reader pass, Web Speech paths, SerpApi, Tiger Data against a real database in CI, Render. In a browser: the PWA update prompt, install on Android/iOS, and the mobile layout fixes of 2026-10-11 (only Discover at 320×640 was looked at before them).

@@ -16,6 +16,7 @@
 - **Logs:** request logs contain only request id, method, URL and status (no headers, IPs or bodies). Pino redacts `authorization`, `cookie`, `token`, `apiKey`, `text`, `transcript`, `prompt`, `feedback`, `lat`, `lon`, `coords` and `coarseLocation` at any logged path (tested in `server/test/unit.test.ts`).
 - **Session tokens:** 256-bit random. Only a SHA-256 hash is stored server-side. The token lives in the browser's IndexedDB.
 - **Shared data:** observations linked to a public place contribute to anonymous evidence counts (no owner IDs are exposed). Feedback text and ratings are private to the session.
+- **Third parties (only when configured):** the AI provider (Google AI Studio or a local Ollama) receives prompts, notes, place names and evidence labels, never coordinates. ElevenLabs receives step text only. Tiger Data receives place-linked observations with a SHA-256 hash of the owner id instead of the id. Backboard receives your planning prompts only if you turn on Settings → Memory (off by default). Sentry receives span names, counts, model names and token usage, never prompts, notes or coordinates. Details per service: [INTEGRATIONS.md](INTEGRATIONS.md).
 - **Secrets:** none in the frontend or repo. `.env` is gitignored and `.env.example` lists every variable.
 
 ## Retention
@@ -26,8 +27,10 @@
 | Started missions, observations, reports, preferences | Kept until the user deletes them |
 | Evidence summaries | Derived; recomputed when contributing observations are deleted |
 | Discovered public places | Kept as a cache of public map data |
+| Tiger Data observation mirror | Kept until the user deletes their data; the time-of-day panel reads the last 90 days |
+| Backboard request memory | Kept until the user deletes their data (turning the setting off stops reading and writing it) |
 | Inactive anonymous sessions | Not auto-deleted yet (gap) |
 
 ## Export and deletion
-- `GET /api/v1/me/export` (Settings → "Download my data") returns all session-owned data as JSON.
-- `DELETE /api/v1/me` (Settings → "Delete all my data") deletes missions, observations, reports, sync records, preferences and the session, then recomputes shared evidence for affected places. The client also clears its IndexedDB.
+- `GET /api/v1/me/export` (Settings → "Download my data") returns all session-owned data in MongoDB as JSON. Backboard memory and the Tiger Data mirror are not included.
+- `DELETE /api/v1/me` (Settings → "Delete all my data") deletes missions, observations, reports, sync records, preferences and the session, then recomputes shared evidence for affected places. It also deletes the owner's Tiger Data rows and Backboard assistant, and reports `tigerRowsDeleted` (a count, or `null` if Tiger is off or the delete failed) and `backboardMemoryDeleted` (`true`/`false`, or `null` if there was no memory). The client also clears its IndexedDB.

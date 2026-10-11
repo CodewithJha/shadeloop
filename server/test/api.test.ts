@@ -1,0 +1,317 @@
+import request from 'supertest';
+import type { Express } from 'express';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Mission, Report } from '@shadeloop/shared';
+import { closeDb, col, connectDb } from '../src/db.ts';
+import { createApp } from '../src/app.ts';
+import { clearProviderCache } from '../src/providers.ts';
+
+type Route = (url: string, init?: RequestInit) => Response;
+const json = (b: unknown) => new Response(JSON.stringify(b), { status: 200, headers: { 'content-type': 'application/json' } });
+const down: Route = () => {
+  throw new TypeError('fetch failed');
+};
+const overpass = {
+  elements: [
+    { type: 'way', id: 1, center: { lat: 12.981, lon: 77.591 }, tags: { leisure: 'park', name: 'Test Park' } },
+    { type: 'node', id: 2, lat: 12.979, lon: 77.589, tags: { amenity: 'bench' } },
+  ],
+};
+const meteo = { current: { time: '2026-06-01T06:00', temperature_2m: 34, apparent_temperature: 36, precipitation: 0, wind_speed_10m: 5, weather_code: 0 } };
+const liveData: Route = (url, init) => (url.includes('overpass') ? json(overpass) : url.includes('open-meteo') ? json(meteo) : down(url, init));
+
+let routes: Route = down;
+let app: Express;
+
+beforeAll(async () => {
+  await connectDb();
+  app = createApp();
+  vi.stubGlobal('fetch', async (u: string | URL, init?: RequestInit) => routes(String(u), init));
+});
+afterAll(async () => {
+  vi.unstubAllGlobals();
+  await closeDb();
+});
+beforeEach(() => {
+  routes = down;
+  clearProviderCache();
+});
+
+const api = '/api/v1';
+const uuid = () => crypto.randomUUID();
+const now = () => new Date().toISOString();
+async function session() {
+  const r = await request(app).post(`${api}/sessions`).expect(201);
+  return { Authorization: `Bearer ${r.body.token}` };
+}
+async function plan(h: Record<string, string>, body: object = { availableMinutes: 20, missionType: 'quiet_break' }) {
+  const r = await request(app).post(`${api}/missions/plan`).set(h).send(body).expect(201);
+  return r.body as { missions: Mission[]; planning: Record<string, any> };
+}
+const observe = (h: Record<string, string>, id: string, attribute: string, value: string, opId = uuid()) =>
+  request(app).post(`${api}/missions/${id}/observations`).set(h).send({ attribute, value, opId, clientTs: now() });
+
+describe('health and errors', () => {
+  it('reports liveness and honest dependency status when everything external is down', async () => {
+    await request(app).get(`${api}/health`).expect(200, /ok/);
+    const r = await request(app).get(`${api}/health/dependencies`).expect(200);
+    const byName = Object.fromEntries(r.body.dependencies.map((d: { name: string; status: string }) => [d.name, d.status]));
+    expect(byName).toMatchObject({ mongodb: 'VERIFIED', 'ai:ollama': 'DEGRADED', serpapi: 'NOT_CONFIGURED', fixture: 'DISABLED' });
+    expect(r.body.notImplemented).toContain('elevenlabs');
+  });
+  it('requires a session token and uses the error envelope', async () => {
+    const r = await request(app).get(`${api}/missions`).expect(401);
+    expect(r.body.error).toMatchObject({ code: 'UNAUTHORIZED' });
+    expect(r.body.error.requestId).toBeTruthy();
+    await request(app).get(`${api}/missions`).set({ Authorization: 'Bearer nope' }).expect(401);
+  });
+  it('validates input, rejects bad JSON and oversized bodies', async () => {
+    const h = await session();
+    const r = await request(app).post(`${api}/missions/plan`).set(h).send({ availableMinutes: 2 }).expect(400);
+    expect(r.body.error.code).toBe('VALIDATION_ERROR');
+    await request(app).post(`${api}/missions/plan`).set(h).set('content-type', 'application/json').send('{bad').expect(400);
+    await request(app).post(`${api}/missions/plan`).set(h).send({ prompt: 'x'.repeat(200_000) }).expect(413);
+    await request(app).get(`${api}/nope`).set(h).expect(404);
+  });
+  it('serves a generated OpenAPI document', async () => {
+    const r = await request(app).get(`${api}/openapi.json`).expect(200);
+    expect(r.body.paths['/sync'].post.requestBody).toBeTruthy();
+  });
+});
+
+describe('planning with AI down (fallback)', () => {
+  it('persists template missions with honest provenance and owner isolation', async () => {
+    const h = await session();
+    const { missions, planning } = await plan(h, { prompt: 'I have 15 minutes for a quiet break with some shade' });
+    expect(missions.length).toBeGreaterThan(0);
+    const m = missions[0];
+    expect(m.provenance).toMatchObject({ generator: 'template', fallbackUsed: true, provider: 'ollama', fallbackReason: 'fetch failed' });
+    expect(planning.parse.method).toBe('keywords');
+    expect(m.estimatedMinutes).toBeLessThanOrEqual(15);
+    expect(m.conditionChecks.find((c) => c.condition === 'shade')?.status).toBe('unknown');
+    expect(m.uncertainty.join(' ')).toMatch(/weather was not checked/);
+    const got = await request(app).get(`${api}/missions/${m.id}`).set(h).expect(200);
+    expect(got.body.id).toBe(m.id);
+    await request(app).get(`${api}/missions/${m.id}`).set(await session()).expect(404);
+  });
+});
+
+describe('planning with AI up', () => {
+  const chat = (content: object) => json({ message: { content: JSON.stringify(content) } });
+  const aiRoutes = (proposal: object): Route => (url, init) => {
+    if (!url.includes('/api/chat')) return liveData(url, init);
+    const body = JSON.parse(String(init?.body));
+    const system: string = body.messages[0].content;
+    if (system.includes('extract constraints')) return chat({ missionType: 'nature_observation', availableMinutes: 20, preferred: ['shade'] });
+    if (system.includes('micro-missions')) return chat({ missions: [proposal] });
+    return chat({ summary: 'You spent time outside and noted the shade.' });
+  };
+  const good = {
+    title: 'Leaf count',
+    description: 'Count leaf shapes near a tree in the park.',
+    type: 'nature_observation',
+    objective: 'Notice variety',
+    locationId: 'null',
+    steps: [{ text: 'Find a tree and count leaf shapes', minutes: 30, kind: 'observe' }],
+    observationPrompts: ['shade_quality'],
+    whyItMatches: 'Short and observational.',
+  };
+
+  it('uses validated AI output, shrinking durations to fit and labelling it', async () => {
+    routes = aiRoutes(good);
+    const { missions, planning } = await plan(await session(), { prompt: 'twenty minutes looking at plants' });
+    expect(planning.parse.method).toBe('ai');
+    expect(missions[0].provenance).toMatchObject({ generator: 'ai', fallbackUsed: false, model: 'gemma3:4b' });
+    expect(missions[0].estimatedMinutes).toBe(20);
+    expect(missions[0].uncertainty.join(' ')).toMatch(/shortened by the constraint engine/);
+    expect(missions[0].whyItMatches[0]).toMatchObject({ sourceType: 'ai_suggestion' });
+  });
+  it('rejects AI that invents locations or gives unsafe advice, then falls back', async () => {
+    for (const bad of [{ ...good, locationId: 'osm:way/999999' }, { ...good, steps: [{ text: 'Climb over the fence for a better view', minutes: 5, kind: 'walk' }] }]) {
+      routes = aiRoutes(bad);
+      const { missions, planning } = await plan(await session(), { prompt: 'twenty minutes looking at plants' });
+      expect(missions[0].provenance.generator).toBe('template');
+      expect(planning.generation.rejectedCandidates.length).toBe(1);
+    }
+  });
+});
+
+describe('mission lifecycle', () => {
+  it('enforces the state machine with 409s', async () => {
+    const h = await session();
+    const [m] = (await plan(h)).missions;
+    const go = (a: string) => request(app).post(`${api}/missions/${m.id}/${a}`).set(h).send({});
+    expect((await go('complete').expect(409)).body.error.code).toBe('INVALID_TRANSITION');
+    await go('start').expect(200);
+    await go('start').expect(409);
+    await go('pause').expect(200);
+    await go('resume').expect(200);
+    const done = await request(app).post(`${api}/missions/${m.id}/complete`).set(h).send({ actualMinutes: 14, rating: 4 }).expect(200);
+    expect(done.body.mission.status).toBe('completed');
+    expect(done.body.reportId).toBeTruthy();
+    await go('cancel').expect(409);
+    await go('explode').expect(404);
+  });
+  it('validates observations and makes them idempotent by opId', async () => {
+    const h = await session();
+    const [m] = (await plan(h)).missions;
+    expect((await observe(h, m.id, 'noise_level', 'quiet').expect(409)).body.error.code).toBe('MISSION_NOT_ACTIVE');
+    await request(app).post(`${api}/missions/${m.id}/start`).set(h).send({}).expect(200);
+    await observe(h, m.id, 'noise_level', 'found').expect(400);
+    const opId = uuid();
+    await observe(h, m.id, 'noise_level', 'quiet', opId).expect(201);
+    const again = await observe(h, m.id, 'noise_level', 'quiet', opId).expect(200);
+    expect(again.body.duplicate).toBe(true);
+    const list = await request(app).get(`${api}/missions/${m.id}/observations`).set(h).expect(200);
+    expect(list.body.items).toHaveLength(1);
+    expect(list.body.items[0]).toMatchObject({ sourceType: 'user_report', verificationStatus: 'unverified', privacy: 'mission_only' });
+  });
+  it('turns notes into proposed observations without saving them', async () => {
+    const h = await session();
+    const [m] = (await plan(h)).missions;
+    const r = await request(app).post(`${api}/missions/${m.id}/observations/parse`).set(h).send({ text: 'no bench, very noisy' }).expect(200);
+    expect(r.body).toMatchObject({ method: 'keywords', fallbackUsed: true });
+    expect(r.body.proposals).toEqual([
+      { attribute: 'bench_availability', value: 'not_found' },
+      { attribute: 'noise_level', value: 'loud' },
+    ]);
+    expect((await request(app).get(`${api}/missions/${m.id}/observations`).set(h)).body.items).toHaveLength(0);
+  });
+});
+
+describe('field truth loop (end to end)', () => {
+  it('plan → start → observe → complete → report → evidence → better next plan', async () => {
+    routes = liveData;
+    const origin = { lat: 12.98, lon: 77.59 };
+    const disc = await request(app).post(`${api}/discovery/search`).set(await session()).send(origin).expect(200);
+    expect(disc.body.locations[0]).toMatchObject({ id: 'osm:way/1', name: 'Test Park', source: 'openstreetmap', isFixture: false });
+    expect(disc.body.limitations.join(' ')).toMatch(/not that it has shade/);
+
+    const runOnce = async (shade: string) => {
+      const h = await session();
+      const { missions } = await plan(h, { availableMinutes: 30, missionType: 'quiet_break', preferred: ['shade'], locationIds: ['osm:way/1'], coarseLocation: origin });
+      const m = missions[0];
+      expect(m.selectedLocation?.id).toBe('osm:way/1');
+      expect(m.safetyNotes.join(' ')).toMatch(/feels hot: 36°C/);
+      await request(app).post(`${api}/missions/${m.id}/start`).set(h).send({}).expect(200);
+      await observe(h, m.id, 'shade_quality', shade).expect(201);
+      await observe(h, m.id, 'temperature_feel', 'hotter_than_expected').expect(201);
+      const done = await request(app).post(`${api}/missions/${m.id}/complete`).set(h).send({}).expect(200);
+      const report = (await request(app).get(`${api}/reports/${done.body.reportId}`).set(h).expect(200)).body as Report;
+      return { m, report, h };
+    };
+
+    const first = await runOnce('none');
+    expect(first.report.comparisons.find((c) => c.attribute === 'shade_quality')).toMatchObject({ expected: null, result: 'no_expectation' });
+    expect(first.report.comparisons.find((c) => c.attribute === 'temperature_feel')?.result).toBe('observed_higher_than_expected');
+    expect(first.report.evidenceRefs[0]).toMatchObject({ attribute: 'shade_quality', confidence: 'low', estimate: 'none', supporting: 1 });
+    expect(first.report.summary).toMatchObject({ generator: 'template', fallbackUsed: true });
+
+    await runOnce('none');
+    const third = await runOnce('none');
+    expect(third.report.evidenceRefs[0]).toMatchObject({ confidence: 'moderate', estimate: 'none', supporting: 3 });
+
+    // Next user who prefers shade sees the contradiction instead of a silent "yes".
+    const fourth = await runOnce('good');
+    expect(fourth.m.conditionChecks[0]).toMatchObject({ condition: 'shade', status: 'contradicted' });
+    expect(fourth.m.expectations.find((e) => e.attribute === 'shade_quality')).toMatchObject({ estimate: 'none', confidence: 'moderate' });
+    expect(fourth.report.comparisons.find((c) => c.attribute === 'shade_quality')?.result).toBe('observed_higher_than_expected');
+
+    // A user who *requires* shade is not sent there.
+    const strict = await plan(await session(), { availableMinutes: 30, missionType: 'quiet_break', required: ['shade'], locationIds: ['osm:way/1'], coarseLocation: origin });
+    expect(strict.missions[0].selectedLocation).toBeNull();
+
+    const hist = await request(app).get(`${api}/history`).set(first.h).expect(200);
+    expect(hist.body.items[0].report.summary).toMatch(/Completed/);
+
+    // Deleting a contributor's data recomputes shared evidence.
+    await request(app).delete(`${api}/me`).set(first.h).expect(200);
+    await request(app).get(`${api}/missions`).set(first.h).expect(401);
+    const e = await col('evidence').findOne({ locationId: 'osm:way/1', attribute: 'shade_quality' });
+    expect(e).toMatchObject({ confidence: 'conflicting', valueCounts: { none: 2, good: 1 } });
+  });
+});
+
+describe('offline sync', () => {
+  it('applies a batch, replays idempotently, and reports conflicts per op', async () => {
+    const h = await session();
+    const [m] = (await plan(h)).missions;
+    // Timestamps can't precede the mission or exceed the 5-minute clock-skew allowance, so stay inside that window.
+    const t0 = Date.parse(m.createdAt);
+    const at = (min: number) => new Date(t0 + min * 60_000).toISOString();
+    const ops = [
+      { opId: uuid(), missionId: m.id, clientTs: at(0), type: 'start' },
+      { opId: uuid(), missionId: m.id, clientTs: at(0.5), type: 'observation', payload: { attribute: 'crowding', value: 'busy' } },
+      { opId: uuid(), missionId: m.id, clientTs: at(1), type: 'pause', payload: { currentStep: 1 } },
+      { opId: uuid(), missionId: m.id, clientTs: at(3), type: 'resume' },
+      { opId: uuid(), missionId: m.id, clientTs: at(4), type: 'complete', payload: { currentStep: 3 } },
+    ];
+    const first = await request(app).post(`${api}/sync`).set(h).send({ ops }).expect(200);
+    expect(first.body.results.map((r: { status: string }) => r.status)).toEqual(['applied', 'applied', 'applied', 'applied', 'applied']);
+    const reportId = first.body.results[4].result.reportId;
+    const report = (await request(app).get(`${api}/reports/${reportId}`).set(h).expect(200)).body as Report;
+    expect(report.actual).toMatchObject({ minutes: 2, minutesSource: 'timestamps', stepsReached: 4 });
+
+    const replay = await request(app).post(`${api}/sync`).set(h).send({ ops }).expect(200);
+    expect(replay.body.results.every((r: { status: string }) => r.status === 'duplicate')).toBe(true);
+    expect(replay.body.results[4].result.reportId).toBe(reportId);
+    expect((await request(app).get(`${api}/missions/${m.id}/observations`).set(h)).body.items).toHaveLength(1);
+
+    const late = await request(app)
+      .post(`${api}/sync`)
+      .set(h)
+      .send({
+        ops: [
+          { opId: uuid(), missionId: m.id, clientTs: now(), type: 'observation', payload: { attribute: 'noise_level', value: 'quiet' } },
+          { opId: uuid(), missionId: m.id, clientTs: new Date(Date.now() + 3_600_000).toISOString(), type: 'cancel' },
+          { opId: uuid(), missionId: 'missing', clientTs: now(), type: 'start' },
+        ],
+      })
+      .expect(200);
+    expect(late.body.results.map((r: { status: string; error: { code: string } }) => [r.status, r.error.code])).toEqual([
+      ['conflict', 'MISSION_NOT_ACTIVE'],
+      ['conflict', 'INVALID_TRANSITION'],
+      ['rejected', 'NOT_FOUND'],
+    ]);
+
+    const stolen = await request(app).post(`${api}/sync`).set(await session()).send({ ops: [ops[0]] }).expect(200);
+    expect(stolen.body.results[0]).toMatchObject({ status: 'rejected', error: { code: 'OPID_CONFLICT' } });
+  });
+  it('rejects future timestamps', async () => {
+    const h = await session();
+    const [m] = (await plan(h)).missions;
+    const r = await request(app)
+      .post(`${api}/sync`)
+      .set(h)
+      .send({ ops: [{ opId: uuid(), missionId: m.id, clientTs: new Date(Date.now() + 3_600_000).toISOString(), type: 'start' }] })
+      .expect(200);
+    expect(r.body.results[0]).toMatchObject({ status: 'rejected', error: { code: 'CLOCK_SKEW' } });
+  });
+});
+
+describe('preferences, analytics, export', () => {
+  it('round-trips preferences and applies them to planning', async () => {
+    const h = await session();
+    const prefs = (await request(app).get(`${api}/preferences`).set(h).expect(200)).body;
+    expect(prefs.defaultMinutes).toBe(20);
+    await request(app).put(`${api}/preferences`).set(h).send({ ...prefs, maxWalkMinutes: 500 }).expect(400);
+    await request(app).put(`${api}/preferences`).set(h).send({ ...prefs, accessibility: { ...prefs.accessibility, stepFreeRequired: true } }).expect(200);
+    await request(app).put(`${api}/preferences`).set(h).send({ ...prefs, sneaky: true }).expect(400);
+    const { missions } = await plan(h);
+    expect(missions[0].constraints.required).toContain('step_free');
+  });
+  it('returns insufficient data instead of invented stats', async () => {
+    const h = await session();
+    const o = (await request(app).get(`${api}/analytics/overview`).set(h).expect(200)).body;
+    expect(o).toMatchObject({ insufficientData: true, completionRate: null, averageMinutes: null, sampleSize: 0 });
+    const a = (await request(app).get(`${api}/analytics/attributes`).set(h).expect(200)).body;
+    expect(a.items.every((i: { insufficientData: boolean }) => i.insufficientData)).toBe(true);
+  });
+  it('exports only the caller’s data', async () => {
+    const h = await session();
+    await plan(h);
+    const r = await request(app).get(`${api}/me/export`).set(h).expect(200);
+    expect(r.body.missions.length).toBeGreaterThan(0);
+    expect(JSON.stringify(r.body)).not.toContain('ownerId');
+  });
+});

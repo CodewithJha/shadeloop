@@ -107,6 +107,12 @@ export const api = {
   deps: () => call<{ status: string; dependencies: Dependency[]; notImplemented: string[] }>('GET', '/health/dependencies', undefined, false),
   parseNote: (missionId: string, text: string) =>
     call<{ proposals: { attribute: string; value: string }[]; method: string; model: string | null; fallbackReason: string | null }>('POST', `/missions/${missionId}/observations/parse`, { text }),
+  /** ElevenLabs audio for one step; throws when unavailable so the caller can use the browser voice. */
+  speech: async (missionId: string, step: number) => {
+    const res = await fetch(`/api/v1/missions/${missionId}/steps/${step}/speech`, { headers: { authorization: `Bearer ${await token()}` }, signal: AbortSignal.timeout(15_000) });
+    if (!res.ok || !res.headers.get('content-type')?.startsWith('audio/')) throw new Error(`speech HTTP ${res.status}`);
+    return res.blob();
+  },
   exportData: () => call<unknown>('GET', '/me/export'),
   deleteMe: () => call<unknown>('DELETE', '/me'),
 };

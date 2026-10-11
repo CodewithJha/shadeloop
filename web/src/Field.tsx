@@ -95,7 +95,16 @@ export function FieldMode({ id }: { id: string }) {
     }
   }
 
-  const canSpeak = prefs?.voice.readStepsAloud && 'speechSynthesis' in globalThis;
+  const canSpeak = prefs?.voice.readStepsAloud && (online || 'speechSynthesis' in globalThis);
+  async function readAloud() {
+    const text = m.steps[step].text;
+    try {
+      if (!online) throw new Error('offline');
+      await new Audio(URL.createObjectURL(await api.speech(id, step))).play();
+    } catch {
+      if ('speechSynthesis' in globalThis) speechSynthesis.speak(new SpeechSynthesisUtterance(text));
+    }
+  }
   const recorded = new Map(local.observations.map((o) => [o.attribute, o.value]));
 
   return (
@@ -119,7 +128,7 @@ export function FieldMode({ id }: { id: string }) {
           Next step
         </button>
         {canSpeak && (
-          <button type="button" onClick={() => speechSynthesis.speak(new SpeechSynthesisUtterance(m.steps[step].text))}>
+          <button type="button" onClick={() => void readAloud()}>
             Read aloud
           </button>
         )}

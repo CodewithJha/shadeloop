@@ -39,6 +39,7 @@ import { aiParseRequest, aiProposeMissions, type AiMeta } from './ai.ts';
 import { buildTemplate, keywordConstraints, relatedTypes, templateSummary } from './fallback.ts';
 import { discover, getWeather, loadLocations, type DiscoveryResult } from './providers.ts';
 import { span, tool } from './integrations.ts';
+import { tigerRecord } from './tiger.ts';
 import { getPrefs } from './account.ts';
 import { log } from './log.ts';
 
@@ -660,6 +661,7 @@ export async function addObservation(
     throw notActive(now.status);
   }
   if (duplicate) return { observation: doc, duplicate: true, evidence: null };
+  await tigerRecord(doc);
   const evidence = locationId ? await recomputeEvidence(locationId, input.attribute) : null;
   return { observation: doc, duplicate: false, evidence };
 }

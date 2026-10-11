@@ -24,6 +24,7 @@ const Env = z
     OPEN_METEO_URL: z.url().default('https://api.open-meteo.com/v1/forecast'),
     HTTP_TIMEOUT_MS: z.coerce.number().int().min(500).max(60_000).default(20_000),
     SENTRY_DSN: z.url().optional(),
+    TIGER_DATABASE_URL: z.string().regex(/^postgres(ql)?:\/\//, 'must be a postgres:// URL').optional(),
     ELEVENLABS_API_KEY: z.string().min(1).optional(),
     ELEVENLABS_VOICE_ID: z.string().regex(/^\w+$/).default('JBFqnCBsd6RMkjVDRZzb'),
   })

@@ -28,6 +28,7 @@ import { aiHealth, aiParseNote } from './ai.ts';
 import { lastCall, statusFrom } from './integrations.ts';
 import { keywordObservations } from './fallback.ts';
 import { discover, speak } from './providers.ts';
+import { tigerHourly } from './tiger.ts';
 import { analyticsAttributes, analyticsOverview, createOwner, deleteData, exportData, getPrefs, ownerFromToken, putPrefs } from './account.ts';
 import { addObservation, clockOffset, getMission, getReport, history, listMissions, listObservations, missionView, planMissions, sync, transition } from './missions.ts';
 import { openapi } from './openapi.ts';
@@ -41,6 +42,13 @@ function parse<T>(schema: z.ZodType<T>, data: unknown): T {
 }
 
 const Id = z.string().min(1).max(100);
+const isTimeZone = (t: string) => {
+  try {
+    return Boolean(new Intl.DateTimeFormat('en', { timeZone: t }));
+  } catch {
+    return false;
+  }
+};
 const Page = z.object({
   page: z.coerce.number().int().min(1).max(10_000).default(1),
   limit: z.coerce.number().int().min(1).max(50).default(20),
@@ -52,7 +60,7 @@ const Page = z.object({
 });
 const CompleteBody = CompletePayload.extend({ clientTs: TransitionPayload.shape.clientTs, sentAt: TransitionPayload.shape.sentAt });
 
-const NOT_IMPLEMENTED = ['tiger-data', 'mastra', 'temporal', 'backboard', 'tabpfn'];
+const NOT_IMPLEMENTED = ['mastra', 'temporal', 'backboard', 'tabpfn'];
 
 const owner = (res: Response) => res.locals.ownerId as string;
 
@@ -138,6 +146,13 @@ export function createApp() {
         detail: Sentry.getClient() ? 'SDK initialised; spans carry counts and model names, never prompts or locations' : 'Set SENTRY_DSN to enable',
       },
       {
+        name: 'tiger-data',
+        role: 'Time-series mirror of place observations; hourly patterns per place',
+        status: statusFrom({ name: 'tiger-data', enabled: true, configured: Boolean(env.TIGER_DATABASE_URL), needsConfig: true }),
+        detail: env.TIGER_DATABASE_URL ? 'Configured. Status reflects the last real call.' : 'Set TIGER_DATABASE_URL to enable',
+        lastCall: lastCall('tiger-data'),
+      },
+      {
         name: 'elevenlabs',
         role: 'Natural voice for reading steps aloud (browser voice is the offline fallback)',
         status: statusFrom({ name: 'elevenlabs', enabled: true, configured: Boolean(env.ELEVENLABS_API_KEY), needsConfig: true }),
@@ -213,6 +228,14 @@ export function createApp() {
       fallbackUsed: !ai.data,
       fallbackReason: ai.meta.fallbackReason,
     });
+  });
+
+  api.get('/locations/:id/hourly', async (req, res) => {
+    const id = parse(Id, req.params.id);
+    const { tz } = parse(z.object({ tz: z.string().max(64).refine(isTimeZone, 'unknown time zone').default('UTC') }), req.query);
+    if (!env.TIGER_DATABASE_URL) return void res.json({ available: false, reason: 'Tiger Data is not configured', hours: [] });
+    const hours = await tigerHourly(id, tz);
+    res.json(hours ? { available: true, timeZone: tz, windowDays: 90, hours } : { available: false, reason: 'Tiger Data is unavailable right now', hours: [] });
   });
 
   // Speaks a step of the caller's own mission, never arbitrary text, so the voice budget can't be spent on anything else.

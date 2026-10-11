@@ -57,8 +57,16 @@ describe('health and errors', () => {
     await request(app).get(`${api}/health`).expect(200, /ok/);
     const r = await request(app).get(`${api}/health/dependencies`).expect(200);
     const byName = Object.fromEntries(r.body.dependencies.map((d: { name: string; status: string }) => [d.name, d.status]));
-    expect(byName).toMatchObject({ mongodb: 'VERIFIED', 'ai:ollama': 'DEGRADED', serpapi: 'NOT_CONFIGURED', fixture: 'DISABLED' });
-    expect(r.body.notImplemented).toContain('elevenlabs');
+    expect(byName).toMatchObject({
+      mongodb: 'VERIFIED',
+      'ai:ollama': 'DEGRADED',
+      serpapi: 'NOT_CONFIGURED',
+      fixture: 'DISABLED',
+      sentry: 'NOT_CONFIGURED',
+      'tiger-data': 'NOT_CONFIGURED',
+      elevenlabs: 'NOT_CONFIGURED',
+    });
+    expect(r.body.notImplemented).toEqual(['mastra', 'temporal', 'backboard', 'tabpfn']);
   });
   it('requires a session token and uses the error envelope', async () => {
     const r = await request(app).get(`${api}/missions`).expect(401);

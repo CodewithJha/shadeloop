@@ -285,3 +285,13 @@ describe('ElevenLabs step speech', () => {
     expect(lastCall('elevenlabs')?.ok).toBe(false);
   });
 });
+
+describe('Tiger Data hourly patterns', () => {
+  it('reports unavailable without TIGER_DATABASE_URL and validates the time zone', async () => {
+    const token = (await request(app).post(`${api}/sessions`).send({})).body.token as string;
+    const get = (q: string) => request(app).get(`${api}/locations/osm%3Away%2F1/hourly${q}`).set('authorization', `Bearer ${token}`);
+    expect((await get('?tz=Asia/Kolkata')).body).toEqual({ available: false, reason: 'Tiger Data is not configured', hours: [] });
+    expect((await get('?tz=Mars/Base')).status).toBe(400);
+    expect((await request(app).delete(`${api}/me`).set('authorization', `Bearer ${token}`)).body.tigerRowsDeleted).toBeNull();
+  });
+});

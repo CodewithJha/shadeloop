@@ -38,6 +38,7 @@ import { AppError, notFound } from './errors.ts';
 import { aiParseRequest, aiProposeMissions, type AiMeta } from './ai.ts';
 import { buildTemplate, keywordConstraints, relatedTypes, templateSummary } from './fallback.ts';
 import { discover, getWeather, loadLocations, type DiscoveryResult } from './providers.ts';
+import { span, tool } from './integrations.ts';
 import { getPrefs } from './account.ts';
 import { log } from './log.ts';
 
@@ -184,7 +185,18 @@ function safetyNotes(weather: WeatherView | null): string[] {
   return notes;
 }
 
-export async function planMissions(ownerId: string, input: PlanRequest) {
+export const planMissions = (ownerId: string, input: PlanRequest) =>
+  span('gen_ai.invoke_agent', 'invoke_agent plan_missions', { 'gen_ai.operation.name': 'invoke_agent', 'gen_ai.agent.name': 'shadeloop.planner' }, async (s) => {
+    const r = await plan(ownerId, input);
+    s.setAttributes({
+      'shadeloop.missions': r.missions.length,
+      'shadeloop.rejected_candidates': r.planning.generation.rejectedCandidates.length,
+      'shadeloop.generator': r.planning.generation.generator,
+    });
+    return r;
+  });
+
+async function plan(ownerId: string, input: PlanRequest) {
   const prefs = await getPrefs(ownerId);
 
   let parse: (AiMeta & { method: 'ai' | 'keywords' }) | null = null;
@@ -200,12 +212,12 @@ export async function planMissions(ownerId: string, input: PlanRequest) {
 
   const origin = input.coarseLocation;
   // Weather needs only the origin, so it runs alongside discovery. It never rejects (failures become `available: false`).
-  const weatherP = origin ? getWeather(origin) : Promise.resolve(null);
+  const weatherP = origin ? tool('get_weather', () => getWeather(origin)) : Promise.resolve(null);
   let locations: LocationView[] = [];
   let discovery: DiscoveryResult | null = null;
   if (input.locationIds?.length) locations = await loadLocations(input.locationIds, origin);
   else if (origin) {
-    discovery = await discover(origin);
+    discovery = await tool('discover_places', () => discover(origin));
     locations = discovery.locations;
   }
   locations = locations

@@ -1,9 +1,10 @@
 /** AI providers (Ollama, OpenAI-compatible). Advisory only: output is Zod-validated and callers always have a deterministic fallback. */
+import * as Sentry from '@sentry/node';
 import { z } from 'zod';
 import { CONDITIONS, MissionType, ObservationValue, type Condition } from '@shadeloop/shared';
 import { env, RULES } from './config.ts';
 import { log } from './log.ts';
-import { lastCall, recordCall, type IntegrationStatus } from './integrations.ts';
+import { lastCall, recordCall, span, type IntegrationStatus } from './integrations.ts';
 import { Candidate } from './domain.ts';
 
 interface Provider {
@@ -23,6 +24,9 @@ async function postJson(url: string, body: unknown, headers: Record<string, stri
   return (await res.json()) as unknown;
 }
 
+const usage = (input?: number, output?: number) =>
+  Sentry.getActiveSpan()?.setAttributes({ 'gen_ai.usage.input_tokens': input, 'gen_ai.usage.output_tokens': output });
+
 const providers = {
   ollama: (): Provider => ({
     name: 'ollama',
@@ -37,7 +41,8 @@ const providers = {
           { role: 'system', content: system },
           { role: 'user', content: user },
         ],
-      })) as { message?: { content?: unknown } };
+      })) as { message?: { content?: unknown }; prompt_eval_count?: number; eval_count?: number };
+      usage(body.prompt_eval_count, body.eval_count);
       if (typeof body.message?.content !== 'string') throw new Error('response missing message content');
       return body.message.content;
     },
@@ -58,7 +63,8 @@ const providers = {
           ],
         },
         { authorization: `Bearer ${env.OPENAI_API_KEY}` },
-      )) as { choices?: { message?: { content?: unknown } }[] };
+      )) as { choices?: { message?: { content?: unknown } }[]; usage?: { prompt_tokens?: number; completion_tokens?: number } };
+      usage(body.usage?.prompt_tokens, body.usage?.completion_tokens);
       const content = body.choices?.[0]?.message?.content;
       if (typeof content !== 'string') throw new Error('response missing choices[0].message.content');
       return content;
@@ -85,25 +91,35 @@ export async function aiJson<T>(task: string, system: string, user: string, sche
   if (!p) return { data: null, meta: { provider: null, model: null, attempts: 0, fallbackUsed: true, fallbackReason: 'AI provider not configured' } };
   const jsonSchema = z.toJSONSchema(schema as z.ZodType, { io: 'input', unrepresentable: 'any' });
   const sys = `${system}\nRespond with a single JSON object only, matching this JSON Schema:\n${JSON.stringify(jsonSchema)}`;
-  let reason = 'unknown error';
-  const attempts = env.AI_MAX_RETRIES + 1;
-  for (let attempt = 1; attempt <= attempts; attempt++) {
-    try {
-      const parsed = schema.safeParse(JSON.parse(stripThought(await p.complete(sys, user, jsonSchema))));
-      if (parsed.success) {
+  const gen = { 'gen_ai.system': p.name, 'gen_ai.request.model': p.model };
+  return span('gen_ai.invoke_agent', `invoke_agent ${task}`, { 'gen_ai.operation.name': 'invoke_agent', 'gen_ai.agent.name': `shadeloop.${task}`, ...gen }, async (agent) => {
+    let reason = 'unknown error';
+    const attempts = env.AI_MAX_RETRIES + 1;
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      const data = await span('gen_ai.chat', `chat ${p.model}`, { 'gen_ai.operation.name': 'chat', ...gen, 'shadeloop.attempt': attempt }, async (chat) => {
+        try {
+          const parsed = schema.safeParse(JSON.parse(stripThought(await p.complete(sys, user, jsonSchema))));
+          if (parsed.success) return parsed.data;
+          const issue = parsed.error.issues[0];
+          reason = `invalid output at ${issue?.path.join('.') || '(root)'}: ${issue?.message}`;
+        } catch (e) {
+          // SyntaxError messages can echo model output; keep reasons generic.
+          reason = e instanceof SyntaxError ? 'malformed JSON' : (e as Error).name === 'TimeoutError' ? 'timeout' : (e as Error).message;
+        }
+        chat.setStatus({ code: 2, message: reason });
+        return null;
+      });
+      if (data !== null) {
         recordCall(`ai:${p.name}`, true, `${task}: valid output`);
-        return { data: parsed.data, meta: { provider: p.name, model: p.model, attempts: attempt, fallbackUsed: false, fallbackReason: null } };
+        agent.setAttributes({ 'shadeloop.attempts': attempt, 'shadeloop.fallback_used': false });
+        return { data, meta: { provider: p.name, model: p.model, attempts: attempt, fallbackUsed: false, fallbackReason: null } };
       }
-      const issue = parsed.error.issues[0];
-      reason = `invalid output at ${issue?.path.join('.') || '(root)'}: ${issue?.message}`;
-    } catch (e) {
-      // SyntaxError messages can echo model output; keep reasons generic.
-      reason = e instanceof SyntaxError ? 'malformed JSON' : (e as Error).name === 'TimeoutError' ? 'timeout' : (e as Error).message;
+      log.warn({ task, attempt, reason }, 'AI attempt failed');
     }
-    log.warn({ task, attempt, reason }, 'AI attempt failed');
-  }
-  recordCall(`ai:${p.name}`, false, `${task}: ${reason}`);
-  return { data: null, meta: { provider: p.name, model: p.model, attempts, fallbackUsed: true, fallbackReason: reason } };
+    recordCall(`ai:${p.name}`, false, `${task}: ${reason}`);
+    agent.setAttributes({ 'shadeloop.attempts': attempts, 'shadeloop.fallback_used': true, 'shadeloop.fallback_reason': reason });
+    return { data: null, meta: { provider: p.name, model: p.model, attempts, fallbackUsed: true, fallbackReason: reason } };
+  });
 }
 
 type Probe = { status: IntegrationStatus; detail: string };

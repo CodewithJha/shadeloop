@@ -4,10 +4,11 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "node --watch --env-file-if-exists=../.env src/index.ts",
+    "dev": "node --watch --env-file-if-exists=../.env --import ./src/instrument.ts src/index.ts",
     "test": "vitest run"
   },
   "dependencies": {
+    "@sentry/node": "^11.6.0",
     "@shadeloop/shared": "^0.1.0",
     "express": "^5.3.0",
     "express-rate-limit": "^8.7.1",

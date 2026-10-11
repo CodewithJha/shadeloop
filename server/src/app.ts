@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import * as Sentry from '@sentry/node';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import helmet from 'helmet';
 import { rateLimit } from 'express-rate-limit';
@@ -51,7 +52,7 @@ const Page = z.object({
 });
 const CompleteBody = CompletePayload.extend({ clientTs: TransitionPayload.shape.clientTs, sentAt: TransitionPayload.shape.sentAt });
 
-const NOT_IMPLEMENTED = ['elevenlabs', 'sentry', 'tiger-data', 'mastra', 'temporal', 'backboard', 'tabpfn'];
+const NOT_IMPLEMENTED = ['elevenlabs', 'tiger-data', 'mastra', 'temporal', 'backboard', 'tabpfn'];
 
 const owner = (res: Response) => res.locals.ownerId as string;
 
@@ -129,6 +130,12 @@ export function createApp() {
         status: statusFrom({ name: 'open-meteo', enabled: true, configured: true, needsConfig: false }),
         detail: 'No key needed. Status reflects the last real call.',
         lastCall: lastCall('open-meteo'),
+      },
+      {
+        name: 'sentry',
+        role: 'Agent tracing (planner, tool and model spans) and 5xx errors',
+        status: Sentry.getClient() ? 'CONFIGURED' : 'NOT_CONFIGURED',
+        detail: Sentry.getClient() ? 'SDK initialised; spans carry counts and model names, never prompts or locations' : 'Set SENTRY_DSN to enable',
       },
       { name: 'web-speech', role: 'Optional voice notes and step read-out (browser APIs)', status: 'IMPLEMENTED', detail: 'Runs in the browser where supported; not checked by the server' },
     ];
@@ -265,6 +272,7 @@ export function createApp() {
     app.use((req, res, next) => (req.method === 'GET' && !req.path.startsWith('/api') ? res.sendFile('index.html', { root: dist }) : next()));
   }
 
+  Sentry.setupExpressErrorHandler(app);
   app.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
     let e: AppError;
     const type = (err as { type?: string })?.type;

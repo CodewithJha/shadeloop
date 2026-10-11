@@ -16,7 +16,7 @@
   "scripts": {
     "dev": "npm run dev -w server & npm run dev -w web",
     "build": "npm run build -w web",
-    "start": "node server/src/index.ts",
+    "start": "node --import ./server/src/instrument.ts server/src/index.ts",
     "lint": "eslint .",
     "typecheck": "tsc -p server && tsc -p web",
     "test": "npm test -w server && npm test -w web",

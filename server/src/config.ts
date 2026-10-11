@@ -23,6 +23,7 @@ const Env = z
     OVERPASS_URL: z.url().default('https://overpass-api.de/api/interpreter'),
     OPEN_METEO_URL: z.url().default('https://api.open-meteo.com/v1/forecast'),
     HTTP_TIMEOUT_MS: z.coerce.number().int().min(500).max(60_000).default(20_000),
+    SENTRY_DSN: z.url().optional(),
   })
   .refine((e) => !(e.NODE_ENV === 'production' && e.MONGODB_URI === 'memory'), {
     message: 'MONGODB_URI=memory is not allowed in production',

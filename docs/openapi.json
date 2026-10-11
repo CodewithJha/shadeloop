@@ -1,0 +1,1596 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "ShadeLoop API",
+    "version": "0.1.0",
+    "description": "Anonymous session API. Full auth is not implemented."
+  },
+  "servers": [
+    {
+      "url": "/api/v1"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "session": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Token from POST /sessions"
+      }
+    }
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "summary": "Liveness",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/health/dependencies": {
+      "get": {
+        "summary": "Integration status registry",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "503": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          }
+        }
+      }
+    },
+    "/sessions": {
+      "post": {
+        "summary": "Create anonymous session; returns { token }",
+        "responses": {
+          "201": {
+            "description": "OK"
+          },
+          "429": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          }
+        }
+      }
+    },
+    "/discovery/search": {
+      "post": {
+        "summary": "Find mapped parks/gardens/benches near coarse coordinates",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "401": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "404": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "409": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "429": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "lat": {
+                    "type": "number",
+                    "minimum": -90,
+                    "maximum": 90
+                  },
+                  "lon": {
+                    "type": "number",
+                    "minimum": -180,
+                    "maximum": 180
+                  },
+                  "radiusM": {
+                    "default": 1000,
+                    "type": "integer",
+                    "minimum": 200,
+                    "maximum": 3000
+                  },
+                  "query": {
+                    "type": "string",
+                    "maxLength": 100
+                  }
+                },
+                "required": [
+                  "lat",
+                  "lon"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/missions/plan": {
+      "post": {
+        "summary": "Plan up to 3 constraint-validated missions (201)",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "401": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "404": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "409": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "429": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "prompt": {
+                    "type": "string",
+                    "maxLength": 500
+                  },
+                  "availableMinutes": {
+                    "type": "integer",
+                    "minimum": 5,
+                    "maximum": 240
+                  },
+                  "missionType": {
+                    "type": "string",
+                    "enum": [
+                      "quiet_break",
+                      "nature_observation",
+                      "sensory_exploration",
+                      "neighborhood_exploration",
+                      "mindful_walk",
+                      "environmental_observation"
+                    ]
+                  },
+                  "required": {
+                    "maxItems": 6,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "shade",
+                        "bench",
+                        "quiet",
+                        "not_crowded",
+                        "step_free",
+                        "smooth_path"
+                      ]
+                    }
+                  },
+                  "preferred": {
+                    "maxItems": 6,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "shade",
+                        "bench",
+                        "quiet",
+                        "not_crowded",
+                        "step_free",
+                        "smooth_path"
+                      ]
+                    }
+                  },
+                  "coarseLocation": {
+                    "type": "object",
+                    "properties": {
+                      "lat": {
+                        "type": "number",
+                        "minimum": -90,
+                        "maximum": 90
+                      },
+                      "lon": {
+                        "type": "number",
+                        "minimum": -180,
+                        "maximum": 180
+                      }
+                    },
+                    "required": [
+                      "lat",
+                      "lon"
+                    ]
+                  },
+                  "locationIds": {
+                    "maxItems": 10,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    }
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/missions": {
+      "get": {
+        "summary": "List own missions",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "401": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "404": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "409": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "429": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          }
+        },
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "comma-separated statuses"
+          }
+        ]
+      }
+    },
+    "/missions/{id}": {
+      "get": {
+        "summary": "Get mission",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "401": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "404": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "409": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "429": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/missions/{id}/start": {
+      "post": {
+        "summary": "start mission (state machine; 409 on invalid transition)",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "401": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "404": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "409": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "429": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "clientTs": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                  },
+                  "currentStep": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 50
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/missions/{id}/pause": {
+      "post": {
+        "summary": "pause mission (state machine; 409 on invalid transition)",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "401": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "404": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "409": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "429": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "clientTs": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                  },
+                  "currentStep": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 50
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/missions/{id}/resume": {
+      "post": {
+        "summary": "resume mission (state machine; 409 on invalid transition)",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "401": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "404": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "409": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "429": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "clientTs": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                  },
+                  "currentStep": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 50
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/missions/{id}/cancel": {
+      "post": {
+        "summary": "cancel mission (state machine; 409 on invalid transition)",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "401": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "404": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "409": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "429": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "clientTs": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                  },
+                  "currentStep": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 50
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/missions/{id}/complete": {
+      "post": {
+        "summary": "Complete mission and generate report",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "401": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "404": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "409": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "429": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "completionStatus": {
+                    "default": "completed",
+                    "type": "string",
+                    "enum": [
+                      "completed",
+                      "partial"
+                    ]
+                  },
+                  "actualMinutes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 600
+                  },
+                  "rating": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 5
+                  },
+                  "feedback": {
+                    "type": "string",
+                    "maxLength": 1000
+                  },
+                  "currentStep": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 50
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/missions/{id}/observations": {
+      "get": {
+        "summary": "List observations for a mission",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "401": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "404": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "409": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "429": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "post": {
+        "summary": "Record an observation (idempotent by opId)",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "401": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "404": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "409": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "429": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "attribute": {
+                    "type": "string",
+                    "enum": [
+                      "bench_availability",
+                      "shade_quality",
+                      "noise_level",
+                      "crowding",
+                      "path_condition",
+                      "step_free_access",
+                      "temperature_feel"
+                    ]
+                  },
+                  "value": {
+                    "type": "string",
+                    "maxLength": 40
+                  },
+                  "opId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "clientTs": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                  }
+                },
+                "required": [
+                  "attribute",
+                  "value",
+                  "opId",
+                  "clientTs"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/missions/{id}/observations/parse": {
+      "post": {
+        "summary": "Propose observations from a note (nothing saved)",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "401": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "404": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "409": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "429": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1000
+                  }
+                },
+                "required": [
+                  "text"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sync": {
+      "post": {
+        "summary": "Apply queued offline ops idempotently; per-op results",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "401": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "404": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "409": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "429": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "ops": {
+                    "minItems": 1,
+                    "maxItems": 50,
+                    "type": "array",
+                    "items": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "opId": {
+                              "type": "string",
+                              "format": "uuid",
+                              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                            },
+                            "missionId": {
+                              "type": "string",
+                              "maxLength": 100
+                            },
+                            "clientTs": {
+                              "type": "string",
+                              "format": "date-time",
+                              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                            },
+                            "type": {
+                              "type": "string",
+                              "const": "observation"
+                            },
+                            "payload": {
+                              "type": "object",
+                              "properties": {
+                                "attribute": {
+                                  "type": "string",
+                                  "enum": [
+                                    "bench_availability",
+                                    "shade_quality",
+                                    "noise_level",
+                                    "crowding",
+                                    "path_condition",
+                                    "step_free_access",
+                                    "temperature_feel"
+                                  ]
+                                },
+                                "value": {
+                                  "type": "string",
+                                  "maxLength": 40
+                                }
+                              },
+                              "required": [
+                                "attribute",
+                                "value"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "opId",
+                            "missionId",
+                            "clientTs",
+                            "type",
+                            "payload"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "opId": {
+                              "type": "string",
+                              "format": "uuid",
+                              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                            },
+                            "missionId": {
+                              "type": "string",
+                              "maxLength": 100
+                            },
+                            "clientTs": {
+                              "type": "string",
+                              "format": "date-time",
+                              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                            },
+                            "type": {
+                              "type": "string",
+                              "const": "complete"
+                            },
+                            "payload": {
+                              "type": "object",
+                              "properties": {
+                                "completionStatus": {
+                                  "default": "completed",
+                                  "type": "string",
+                                  "enum": [
+                                    "completed",
+                                    "partial"
+                                  ]
+                                },
+                                "actualMinutes": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 600
+                                },
+                                "rating": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 5
+                                },
+                                "feedback": {
+                                  "type": "string",
+                                  "maxLength": 1000
+                                },
+                                "currentStep": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 50
+                                }
+                              },
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "opId",
+                            "missionId",
+                            "clientTs",
+                            "type"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "opId": {
+                              "type": "string",
+                              "format": "uuid",
+                              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                            },
+                            "missionId": {
+                              "type": "string",
+                              "maxLength": 100
+                            },
+                            "clientTs": {
+                              "type": "string",
+                              "format": "date-time",
+                              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                            },
+                            "type": {
+                              "type": "string",
+                              "const": "start"
+                            },
+                            "payload": {
+                              "type": "object",
+                              "properties": {
+                                "currentStep": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 50
+                                }
+                              },
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "opId",
+                            "missionId",
+                            "clientTs",
+                            "type"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "opId": {
+                              "type": "string",
+                              "format": "uuid",
+                              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                            },
+                            "missionId": {
+                              "type": "string",
+                              "maxLength": 100
+                            },
+                            "clientTs": {
+                              "type": "string",
+                              "format": "date-time",
+                              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                            },
+                            "type": {
+                              "type": "string",
+                              "const": "pause"
+                            },
+                            "payload": {
+                              "type": "object",
+                              "properties": {
+                                "currentStep": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 50
+                                }
+                              },
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "opId",
+                            "missionId",
+                            "clientTs",
+                            "type"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "opId": {
+                              "type": "string",
+                              "format": "uuid",
+                              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                            },
+                            "missionId": {
+                              "type": "string",
+                              "maxLength": 100
+                            },
+                            "clientTs": {
+                              "type": "string",
+                              "format": "date-time",
+                              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                            },
+                            "type": {
+                              "type": "string",
+                              "const": "resume"
+                            },
+                            "payload": {
+                              "type": "object",
+                              "properties": {
+                                "currentStep": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 50
+                                }
+                              },
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "opId",
+                            "missionId",
+                            "clientTs",
+                            "type"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "opId": {
+                              "type": "string",
+                              "format": "uuid",
+                              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                            },
+                            "missionId": {
+                              "type": "string",
+                              "maxLength": 100
+                            },
+                            "clientTs": {
+                              "type": "string",
+                              "format": "date-time",
+                              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                            },
+                            "type": {
+                              "type": "string",
+                              "const": "cancel"
+                            },
+                            "payload": {
+                              "type": "object",
+                              "properties": {
+                                "currentStep": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 50
+                                }
+                              },
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "opId",
+                            "missionId",
+                            "clientTs",
+                            "type"
+                          ]
+                        }
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "ops"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/history": {
+      "get": {
+        "summary": "Completed and cancelled missions with report summaries",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "401": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "404": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "409": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "429": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          }
+        },
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20
+            }
+          }
+        ]
+      }
+    },
+    "/reports/{id}": {
+      "get": {
+        "summary": "Completion report",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "401": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "404": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "409": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "429": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/preferences": {
+      "get": {
+        "summary": "Get preferences",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "401": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "404": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "409": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "429": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          }
+        }
+      },
+      "put": {
+        "summary": "Replace preferences",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "401": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "404": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "409": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "429": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "missionTypes": {
+                    "default": [],
+                    "maxItems": 6,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "quiet_break",
+                        "nature_observation",
+                        "sensory_exploration",
+                        "neighborhood_exploration",
+                        "mindful_walk",
+                        "environmental_observation"
+                      ]
+                    }
+                  },
+                  "defaultMinutes": {
+                    "default": 20,
+                    "type": "integer",
+                    "minimum": 5,
+                    "maximum": 120
+                  },
+                  "timeOfDay": {
+                    "default": "any",
+                    "type": "string",
+                    "enum": [
+                      "any",
+                      "morning",
+                      "midday",
+                      "afternoon",
+                      "evening"
+                    ]
+                  },
+                  "maxWalkMinutes": {
+                    "default": 20,
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 120
+                  },
+                  "walkingPace": {
+                    "default": "moderate",
+                    "type": "string",
+                    "enum": [
+                      "slow",
+                      "moderate",
+                      "brisk"
+                    ]
+                  },
+                  "accessibility": {
+                    "default": {
+                      "stepFreeRequired": false,
+                      "needsSeating": false,
+                      "avoidCrowds": false
+                    },
+                    "type": "object",
+                    "properties": {
+                      "stepFreeRequired": {
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "needsSeating": {
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "avoidCrowds": {
+                        "default": false,
+                        "type": "boolean"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "language": {
+                    "default": "en",
+                    "type": "string",
+                    "enum": [
+                      "en"
+                    ]
+                  },
+                  "voice": {
+                    "default": {
+                      "readStepsAloud": false,
+                      "voiceNotes": false
+                    },
+                    "type": "object",
+                    "properties": {
+                      "readStepsAloud": {
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "voiceNotes": {
+                        "default": false,
+                        "type": "boolean"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "privacy": {
+                    "default": {
+                      "useCoarseLocation": false
+                    },
+                    "type": "object",
+                    "properties": {
+                      "useCoarseLocation": {
+                        "default": false,
+                        "type": "boolean"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/analytics/overview": {
+      "get": {
+        "summary": "Own mission stats; derived rates are null when data is insufficient",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "401": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "404": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "409": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "429": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          }
+        }
+      }
+    },
+    "/analytics/attributes": {
+      "get": {
+        "summary": "Own observations per attribute",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "401": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "404": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "409": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "429": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          }
+        }
+      }
+    },
+    "/me/export": {
+      "get": {
+        "summary": "Download all own data as JSON",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "401": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "404": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "409": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "429": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          }
+        }
+      }
+    },
+    "/me": {
+      "delete": {
+        "summary": "Delete all own data and the session",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "401": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "404": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "409": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          },
+          "429": {
+            "description": "Error: { error: { code, message, details?, requestId } }"
+          }
+        }
+      }
+    }
+  }
+}

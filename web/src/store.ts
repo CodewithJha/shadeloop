@@ -114,6 +114,12 @@ export async function dismissOp(opId: string) {
   notify();
 }
 
+/** Connectivity came back: retry failed ops now instead of waiting out their backoff. */
+export async function retryFailed() {
+  const d = await db();
+  for (const q of await d.getAll('ops')) if (q.state === 'failed') await d.put('ops', { ...q, nextAttemptAt: 0 });
+}
+
 export async function retryOp(opId: string) {
   const d = await db();
   const q = await d.get('ops', opId);

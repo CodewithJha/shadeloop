@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type FormEvent } from 'react';
 import { CONDITIONS, MISSION_TYPES, type Condition, type Coords, type Mission, type SourceType } from '@shadeloop/shared';
 import { api, type HistoryItem, type PlanResponse } from './api.ts';
-import { cacheMission, dismissOp, enqueue, flush, getCached, getMeta, listCached, listOps, resetStuck, retryOp, subscribe, updateLocal, type CachedMission, type QueuedOp } from './store.ts';
+import { cacheMission, dismissOp, enqueue, flush, getCached, getMeta, listCached, listOps, resetStuck, retryFailed, retryOp, subscribe, updateLocal, type CachedMission, type QueuedOp } from './store.ts';
 import { Completion, FieldMode } from './Field.tsx';
 import { Settings } from './Settings.tsx';
 
@@ -34,18 +34,21 @@ function useSyncLoop(): SyncState {
   const [ops, setOps] = useState<QueuedOp[]>([]);
   const [online, setOnline] = useState(navigator.onLine);
   const kick = useCallback(() => {
-    void flush(api.sync).catch(() => {});
+    // Offline is expected in the field: don't burn retries; the 'online' event triggers a flush.
+    if (navigator.onLine) void flush(api.sync).catch(() => {});
   }, []);
   useEffect(() => {
     const refresh = () => void listOps().then(setOps);
     const unsub = subscribe(refresh);
-    void resetStuck().then(() => {
-      refresh();
-      kick();
-    });
+    void resetStuck()
+      .then(retryFailed)
+      .then(() => {
+        refresh();
+        kick();
+      });
     const on = () => {
       setOnline(true);
-      kick();
+      void retryFailed().then(kick);
     };
     const off = () => setOnline(false);
     addEventListener('online', on);
@@ -75,8 +78,8 @@ function SyncBadge() {
 
 /** Failed and conflicting ops are always visible until the user retries or dismisses them. */
 function SyncProblems() {
-  const { ops, kick } = useSync();
-  const problems = ops.filter((o) => o.state === 'conflict' || (o.state === 'failed' && o.attempts >= 3));
+  const { ops, online, kick } = useSync();
+  const problems = ops.filter((o) => o.state === 'conflict' || (online && o.state === 'failed' && o.attempts >= 4));
   if (!problems.length) return null;
   return (
     <section className="notice warn" aria-labelledby="sync-problems">

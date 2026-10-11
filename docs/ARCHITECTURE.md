@@ -29,7 +29,7 @@ web/src/
 3. Locations: if `locationIds` are given they're loaded; otherwise, if `coarseLocation` is given, discovery runs. Coordinates are rounded to 2 decimals first.
 4. Weather comes from Open-Meteo, only when a location is given; it is fetched at the same time as discovery (it needs only the origin), so a slow Overpass doesn't add to it. Evidence summaries are loaded, re-evaluated if a freshness boundary has passed.
 5. `aiProposeMissions` runs; its step durations may be shortened by `fitDurations`, then `validateCandidate` checks each one. If none survive, templates are built per type and location and validated by the same engine.
-6. Missions are saved as `planned`, with a 7-day TTL that is removed on start.
+6. Missions are saved as `planned`, with a 7-day TTL that is removed on start or cancel (a cancelled mission stays in history). Missions cancelled before start on databases written before this change still carry the TTL and expire.
 
 ## Persistence (MongoDB)
 Collections: `owners`, `preferences`, `missions` (session embedded), `observations`, `reports`, `evidence`, `locations`, `sync_records`.
@@ -44,7 +44,7 @@ Key indexes: unique `owners.tokenHash`, unique `observations.opId`, unique `sync
 | preferences | `ownerId` unique | get/put preferences, export, delete |
 | missions | `(ownerId, updatedAt -1)` | mission list, export, delete, analytics `$match`, report fallback by `reportId` |
 | missions | `(ownerId, status, updatedAt -1)` | mission list / history filtered by status |
-| missions | `expireAt` TTL | planned missions expire after 7 days |
+| missions | `expireAt` TTL | missions still planned (never started or cancelled) expire after 7 days |
 | observations | `opId` unique | idempotent observations |
 | observations | `(ownerId, missionId, clientTs)` | per-mission list, report build, caps, export, delete, analytics |
 | observations | `(locationId, attribute, ownerId, serverTs -1, _id -1)` | evidence recompute (latest per owner) |
@@ -83,4 +83,4 @@ No multi-document transactions; every guarantee comes from a single-document ato
 **Sync** reserves each opId before applying it: insert `{opId, ownerId, status: pending, lease, leaseUntil}` into `sync_records` (unique `opId`). The holder applies the op and finalizes the row with a conditional update on its lease. A request that hits the duplicate key reads the row: another owner → `rejected / OPID_CONFLICT`; final → `duplicate` with the stored result (including `reportId`); pending with a live lease → `retry / IN_PROGRESS`; pending with an expired lease (holder crashed, `RULES.syncLeaseMs` = 30 s) → taken over with an atomic `findOneAndUpdate` on `{status: pending, leaseUntil ≤ now}`. Re-applying after a takeover is safe because transitions dedupe on `missions.appliedOpIds` and observations on the unique `observations.opId`. Server errors and optimistic-concurrency losses delete the reservation instead of caching it, so only deterministic outcomes (applied, invalid transition, not found, validation) become the stored answer. Only the batch envelope (`SyncEnvelope`: each op's `opId`, `missionId`, `type` string and ISO `clientTs`) is validated for the whole request; the rest of each op is checked against `SyncOp` after its opId is reserved, so an invalid op becomes its own stored `rejected / VALIDATION_ERROR`.
 
 ## Frontend
-Hash routing, no router library. One sync loop (on load, on `online`, and every 15 s), serialised per tab and across tabs with a Web Lock. Every Field Mode action goes through the queue, online or offline. Ops are sent in order per mission, and a refused op holds back the rest of its mission until the user acts (see OFFLINE_SYNC.md). The service worker (Workbox via vite-plugin-pwa) precaches the app shell only; API responses aren't cached by the SW, because mission data lives in IndexedDB.
+Hash routing, no router library. One sync loop (on load, on `online`, and every 15 s), serialised per tab and across tabs with a Web Lock. Every Field Mode action goes through the queue, online or offline. Ops are sent in order per mission, and a refused op holds back the rest of its mission until the user acts (see OFFLINE_SYNC.md). The service worker (Workbox via vite-plugin-pwa) precaches the app shell only; API responses aren't cached by the SW, because mission data lives in IndexedDB. New builds wait for the user's "Reload" (OFFLINE_SYNC.md → Service worker).

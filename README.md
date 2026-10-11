@@ -52,11 +52,26 @@ cp .env.example .env          # defaults: in-memory MongoDB, AI off, live OSM di
 npm run dev                   # API on :8080, web on :5173 (proxies /api)
 ```
 
-The first run with `MONGODB_URI=memory` downloads a MongoDB binary (about 100 MB) through mongodb-memory-server.
+The first run with `MONGODB_URI=memory` downloads a MongoDB binary (about 100 MB) through mongodb-memory-server. The in-memory database is empty on every server start: missions, observations and sessions are lost on restart (the browser then gets a new session automatically, and missions cached on the device show as "no longer exists on the server"). Without a `.env`, pass the variables inline, e.g. `MONGODB_URI=memory DISCOVERY_MODE=fixture npm run dev`.
+
+No variable needs a key or account: only `MONGODB_URI` is required. AI, SerpApi and the OpenAI-compatible provider are optional; Overpass and Open-Meteo are keyless public services.
+
+**Local MongoDB instead of memory (data survives restarts):** `docker run -d --name shadeloop-mongo -p 27017:27017 mongo:8`, then `MONGODB_URI=mongodb://localhost:27017`.
 
 **Gemma via Ollama (optional):** `ollama pull gemma3:4b`, run `ollama serve`, then set `AI_PROVIDER=ollama` in `.env`. Local planning with gemma3:4b took about 20–30 s per request on the development Mac.
 
-**Production-style run:** `npm run build && MONGODB_URI=<atlas-uri> NODE_ENV=production npm start` serves the API and the built PWA on `:8080`.
+**Production build locally:** `npm run build && MONGODB_URI=memory npm start` serves the API and the built PWA (with its service worker) on `:8080`. This is the way to try offline mode and app updates; `npm run dev` doesn't register a service worker.
+
+**Production-style run:** `npm run build && MONGODB_URI=<atlas-uri> NODE_ENV=production npm start`.
+
+**Check it's up:** `curl localhost:8080/api/v1/health` (liveness) and `curl localhost:8080/api/v1/health/dependencies` (MongoDB ping plus the status of each integration).
+
+**Troubleshooting**
+- `Invalid env MONGODB_URI: …` and exit 1: set `MONGODB_URI` (`memory` for dev). Production refuses `memory`.
+- `EADDRINUSE`: something already uses 8080 (API) or 5173 (Vite). Set `PORT` for the API; the Vite proxy in `web/vite.config.ts` expects the API on 8080.
+- AI shows `DEGRADED`: Ollama isn't running or the model isn't pulled (`ollama list`). Planning still works with templates and says so.
+- No named places: live Overpass is often slow or returns 504; use `DISCOVERY_MODE=fixture` for demos (places are labelled as samples).
+- After pulling new code, an open PWA shows "A new version of ShadeLoop is ready" with a Reload button. It never reloads by itself, and the offer waits while Field Mode, the completion form or unsaved input is on screen.
 
 ## Environment variables
 
@@ -81,7 +96,7 @@ The first run with `MONGODB_URI=memory` downloads a MongoDB binary (about 100 MB
 npm run lint && npm run typecheck && npm test && npm run build
 ```
 
-There are 84 server tests (unit and integration, including an end-to-end field-truth-loop test) and 21 web queue tests. External services are mocked in tests. See [docs/TEST_PLAN.md](docs/TEST_PLAN.md).
+There are 117 server tests (unit and integration, including an end-to-end field-truth-loop test) and 38 web tests (offline queue, API client, and a production build check of the PWA manifest, icons and service worker). External services are mocked in tests; there are no automated browser tests. See [docs/TEST_PLAN.md](docs/TEST_PLAN.md).
 
 ## Deployment
 
@@ -120,6 +135,8 @@ For a demo without network discovery, set `DISCOVERY_MODE=fixture`. Places are t
 - Device clocks are corrected per sync request from the time the device says it sent it, so a wrong clock no longer loses data. Corrected times can be late by the request latency, and changing the device clock between recording and syncing shifts those events (they are clamped between the previous event and now). Clients without `sentAt` keep the old 5-minute rule.
 - Durations: you can enter 0–240 minutes; a duration measured from timestamps that is negative or over 240 minutes (e.g. a mission left running for days) is shown as unknown and left out of your totals. Entered minutes are labelled as your estimate and the report shows the measured time next to them, but they aren't corrected or flagged when the two differ; totals use your estimate and say how many estimates they include.
 - A sync op the server can't accept (e.g. a value an older app version allowed) is refused on its own and kept on the device as a conflict; the rest of the batch is applied. Only a malformed batch (missing opId, bad timestamps) is refused as a whole.
+- Offline: a mission opened once online can be started, observed, paused and ended offline. Planning, note suggestions, reports, history, settings and export/delete need a connection.
+- Accessibility: keyboard navigation, labels, focus styles, announced errors and contrast were checked from the code and CSS; no screen-reader or full browser audit has been done, so this is not a compliance claim.
 - Anonymous owners never expire, and the place/weather cache and 429 back-off are per process (see docs/ARCHITECTURE.md).
 - The repo lives at `~/ShadeLoop` (see docs/DECISIONS.md, item 0).
 

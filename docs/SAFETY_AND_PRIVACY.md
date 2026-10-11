@@ -21,7 +21,7 @@
 ## Retention
 | Data | Retention |
 |---|---|
-| Planned missions never started | Auto-deleted after 7 days (Mongo TTL) |
+| Planned missions never started or cancelled | Auto-deleted after 7 days (Mongo TTL) |
 | Sync records (idempotency log) | Auto-deleted after 30 days (Mongo TTL) |
 | Started missions, observations, reports, preferences | Kept until the user deletes them |
 | Evidence summaries | Derived; recomputed when contributing observations are deleted |

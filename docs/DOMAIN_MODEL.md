@@ -22,7 +22,7 @@ Evidence freshness, report observation times and durations use the event time. "
 
 ## Durations
 `MAX_ACTUAL_MINUTES` = 240 (`shared/src/index.ts`, `RULES.maxActualMinutes`), the longest plan budget.
-- User-entered `actualMinutes`: integer 0–240, otherwise 400 `VALIDATION_ERROR` (via `/sync`: that op alone is `rejected / VALIDATION_ERROR`). Used as given (`minutesSource: user`), labelled "your estimate" in the UI.
+- User-entered `actualMinutes`: integer 0–240, otherwise 400 `VALIDATION_ERROR` (via `/sync`: that op alone is `rejected / VALIDATION_ERROR`). Used as given (`minutesSource: user`), labelled "your estimate" in the UI and "by your estimate" in the report summary (reports built before this wording keep their stored text).
 - Otherwise from timestamps: completedAt − startedAt − paused time, all event times. Below 0 or above 240 (e.g. left running and completed days later, or inconsistent stored times) → `minutes: null`, still `minutesSource: timestamps`, and the summary says "actual duration unknown".
 - `measuredMinutes` keeps the timestamp duration (or `null`) on every report, so an estimate is shown next to what was measured ("12 (your estimate; measured 30)"). The estimate is not replaced or flagged: people enter minutes exactly when the timestamps are wrong (forgot to end the mission), so neither value is assumed right.
 - Analytics totals and averages count only reports with minutes in 0–240 and report how many were excluded and how many of the counted ones are user estimates (`minutesUserEstimated`); the average stays `null` below 5 such reports.

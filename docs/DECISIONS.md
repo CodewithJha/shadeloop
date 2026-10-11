@@ -14,4 +14,4 @@ Short log of choices that shape the code. Newest last.
 9. **Paused → completed is allowed.** Ending a paused mission is natural in the field, so you don't have to resume first.
 10. **Discovery results are facts about a map entry, never about conditions.** OSM/SerpApi results set name, category and coordinates only. Shade, safety, access and opening hours stay unknown until people report them.
 11. **Temperature feel is not stored as location evidence.** It's relative to the forecast at that moment, so it appears only in completion reports.
-12. **AI step durations may be shortened deterministically** to fit the time budget (proportional, each step ≥ 1 min). When that happens the mission's uncertainty list says so. Gemma 3 4B often overshoots the budget in local tests.
+12. **AI step durations may be shortened deterministically** to fit the time budget (proportional, each step ≥ 1 min). When that happens the mission's uncertainty list says so. Mission text must not state durations (it would contradict the shortened minutes), so such candidates are rejected. Gemma 3 4B often overshoots the budget in local tests.

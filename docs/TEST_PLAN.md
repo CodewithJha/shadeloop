@@ -1,12 +1,13 @@
 # Test plan
 
-Run everything: `npm run lint && npm run typecheck && npm test && npm run build`.
+Run everything: `npm run lint && npm run typecheck && npm test && npm run build`. Current counts: 84 server tests, 21 web tests.
 
 ## Server unit tests (`server/test/unit.test.ts`)
 - State machine: allowed and rejected transitions.
 - Evidence: unknown, single report = low, same owner counted once, 3 independent = moderate, contradictions → conflicting (estimate withheld), minority < 1/3 tolerated, latest report per owner, stale beyond window, partial expiry and `reevaluateAt`, non-location attribute refused.
 - Conditions: every status mapping; unknown is never satisfied; preference-derived merge.
-- Constraint engine: duration incl. round-trip travel, over-budget rejection, invented location rejection, trespass and medical text rejection, walking limit, contradicted required condition, `fitDurations`, templates respecting budgets.
+- Constraint engine: duration incl. round-trip travel, over-budget rejection, invented location rejection, trespass and medical text rejection, walking limit, contradicted required condition, `fitDurations`, templates respecting budgets. Text stating a duration (digits and words, in steps or description) is rejected while ordinals, distances and "minute details" pass; step minutes outside 1–90 or fractional are rejected; every template × budgets 5–120 × walking limits is a valid, duration-free mission within budget.
+- Template report summary: exact text from recorded facts, no comparison claims without an expectation.
 - Schemas and parsers: observation value per attribute, sync batch validation, keyword constraint and note parsing, planned-vs-observed comparison, coordinate rounding.
 - AI output validation (fetch mocked): malformed → retry → success; schema-invalid twice → fallback after 2 calls; provider unreachable → fallback; fallback reason doesn't echo model output.
 - Log redaction: token, auth header, note text, prompt, coordinates and API key are absent from output.
@@ -14,7 +15,8 @@ Run everything: `npm run lint && npm run typecheck && npm test && npm run build`
 ## Server integration tests (`server/test/api.test.ts`, Supertest + mongodb-memory-server, fetch mocked)
 - Health and dependency statuses with every external service down; auth required; error envelope; validation 400, bad JSON 400, 413 body limit, 404; OpenAPI served.
 - Planning with AI down → template fallback persisted with provenance; owner isolation (404 for another session).
-- Planning with AI up → AI candidate accepted, durations shortened and labelled; AI inventing a location or giving unsafe advice → rejected → template fallback.
+- Planning with AI up → AI candidate accepted, durations shortened and labelled; AI inventing a location or giving unsafe advice → rejected → template fallback. AI step text stating a duration (overshooting, so it would be shortened) → rejected, fallback reason names it, final steps duration-free and within budget; missing, string, wrong-kind or empty steps → `invalid output at missions.0.steps…` fallback; overshooting duration-free steps fit budgets 10/20/45/90.
+- Completion report summary: an AI mock that would say "busier than anticipated" is never called during completion or report reads; summary is the exact template text with `fallbackUsed: false`; timestamp duration used when the user gives none; identical text with AI disabled, unreachable, timing out or returning invalid output.
 - Lifecycle 409s; observations: not-active 409, invalid value 400, duplicate opId idempotent; note parsing proposes but doesn't save.
 - **End to end:** discovery → 4 sessions × (plan → start → observe → complete → report) → evidence goes from low to moderate; the next plan shows `contradicted` and comparisons report `observed_higher_than_expected`; a required-shade plan avoids the place; history; deleting one contributor recomputes evidence to `conflicting`.
 - Sync: batch applied, replay all duplicate with the same reportId, pause time excluded from duration, per-op conflicts, not-found rejected, cross-session opId rejected, future timestamps rejected.

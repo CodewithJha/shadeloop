@@ -81,7 +81,7 @@ The first run with `MONGODB_URI=memory` downloads a MongoDB binary (about 100 MB
 npm run lint && npm run typecheck && npm test && npm run build
 ```
 
-There are 63 server tests (unit and integration, including an end-to-end field-truth-loop test) and 21 web queue tests. External services are mocked in tests. See [docs/TEST_PLAN.md](docs/TEST_PLAN.md).
+There are 84 server tests (unit and integration, including an end-to-end field-truth-loop test) and 21 web queue tests. External services are mocked in tests. See [docs/TEST_PLAN.md](docs/TEST_PLAN.md).
 
 ## Deployment
 
@@ -105,7 +105,7 @@ For a demo without network discovery, set `DISCOVERY_MODE=fixture`. Places are t
 - No routing. Distances are straight-line from a coarse (about 1 km) location, and travel time is an estimate.
 - Evidence needs several independent sessions to reach `moderate`. Sessions are not identities, and presence at a place is not checked, so one person with a few sessions can skew it without being there. A session counts once per place and attribute, and a mission accepts at most 40 observations (10 per attribute), so a single session can't flood other reports away. There is no minimum session age or mission duration for a report to count: both would be easy to wait out.
 - Nothing is verified. No verified accessibility source is integrated (OSM `wheelchair` tags are not used), so step-free access, seating and path condition always show as **unverified** with a "check access yourself" notice, even when reports agree. OpenStreetMap place data is labelled "map data".
-- Small local models (gemma3:4b) often overshoot time budgets. The engine shortens or rejects them, then falls back to templates. AI step text may still mention the original duration after the engine shortened it. The comparison table and step durations are the deterministic source of truth.
+- Small local models (gemma3:4b) often overshoot time budgets. The engine shortens or rejects them, then falls back to templates. Durations live only in step minutes: AI text that states a duration ("10 minutes", "half an hour") is rejected, so it can't contradict shortened steps. The detector is a phrase list, so unusual wordings can slip through, and harmless ones ("take a minute") cause a template fallback. The "why it fits" line written by AI is not checked for durations.
 - The public Overpass API is sometimes slow or returns 504. Planning then proceeds without named places and says so.
 - English only. Voice uses browser APIs only (Web Speech), where supported.
 - Offline changes the server refuses (for example observations for a mission that expired or was cancelled elsewhere) can't be applied. They stay on the device, held per mission, until you download or discard them. There is no merge.

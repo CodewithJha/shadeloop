@@ -288,6 +288,13 @@ function Discover() {
                 : `Weather unavailable (${w.reason}).`}
             </p>
           )}
+          {result.planning.discovery?.sources
+            .filter((s) => !s.ok)
+            .map((s) => (
+              <p key={s.name} className="notice warn" role="status">
+                Place search via {s.name} failed ({s.error}), so these missions may not name a specific place.
+              </p>
+            ))}
           {result.planning.discovery?.limitations.map((l) => (
             <p key={l} className="meta">
               {l}

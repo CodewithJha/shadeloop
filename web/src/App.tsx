@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type FormEvent } from 'react';
 import { CONDITIONS, MISSION_TYPES, type Condition, type Coords, type Mission, type SourceType } from '@shadeloop/shared';
 import { api, type HistoryItem, type PlanResponse } from './api.ts';
-import { cacheMission, dismissOp, enqueue, flush, getCached, getMeta, listCached, listOps, resetStuck, retryFailed, retryOp, subscribe, updateLocal, type CachedMission, type QueuedOp } from './store.ts';
+import { cacheMission, dismissOp, enqueue, flush, getCached, getMeta, listCached, listOps, refreshMission, resetStuck, retryFailed, retryOp, subscribe, updateLocal, type CachedMission, type QueuedOp } from './store.ts';
 import { Completion, FieldMode } from './Field.tsx';
 import { Settings } from './Settings.tsx';
 
@@ -35,7 +35,7 @@ function useSyncLoop(): SyncState {
   const [online, setOnline] = useState(navigator.onLine);
   const kick = useCallback(() => {
     // Offline is expected in the field: don't burn retries; the 'online' event triggers a flush.
-    if (navigator.onLine) void flush(api.sync).catch(() => {});
+    if (navigator.onLine) void flush(api.sync, Date.now(), api.mission).catch(() => {});
   }, []);
   useEffect(() => {
     const refresh = () => void listOps().then(setOps);
@@ -64,10 +64,28 @@ function useSyncLoop(): SyncState {
   return { ops, online, kick };
 }
 
+/** Per mission, the unsynced ops from the first refused one on: they are held, not sent, until the user acts. */
+function heldOps(ops: QueuedOp[]) {
+  const held = new Map<string, QueuedOp[]>();
+  for (const o of ops) {
+    if (o.state === 'conflict' && !held.has(o.missionId)) held.set(o.missionId, []);
+    if (o.state !== 'synced') held.get(o.missionId)?.push(o);
+  }
+  return held;
+}
+
+const opText = (o: QueuedOp) => `${label(o.type)}${o.type === 'observation' ? ` (${label(o.payload.attribute)} = ${label(o.payload.value)})` : ''}`;
+
+function download(name: string, data: unknown) {
+  const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
+  Object.assign(document.createElement('a'), { href: url, download: name }).click();
+  URL.revokeObjectURL(url);
+}
+
 function SyncBadge() {
   const { ops, online } = useSync();
-  const waiting = ops.filter((o) => o.state === 'pending' || o.state === 'syncing' || o.state === 'failed').length;
-  const conflicts = ops.filter((o) => o.state === 'conflict').length;
+  const conflicts = [...heldOps(ops).values()].flat().length;
+  const waiting = ops.filter((o) => o.state !== 'synced').length - conflicts;
   const text = `${online ? 'Online' : 'Offline'} · ${conflicts ? `${conflicts} need attention` : waiting ? `${waiting} waiting to sync` : 'all synced'}`;
   return (
     <span className={`sync${conflicts || (!online && waiting) ? ' warn' : ''}`} role="status" aria-live="polite">
@@ -76,27 +94,66 @@ function SyncBadge() {
   );
 }
 
-/** Failed and conflicting ops are always visible until the user retries or dismisses them. */
+/** Refused, held and repeatedly failing ops stay visible until the user retries, downloads or discards them. */
 function SyncProblems() {
   const { ops, online, kick } = useSync();
-  const problems = ops.filter((o) => o.state === 'conflict' || (online && o.state === 'failed' && o.attempts >= 4));
-  if (!problems.length) return null;
+  const [cached, setCached] = useState(new Map<string, CachedMission>());
+  useEffect(() => void listCached().then((cs) => setCached(new Map(cs.map((c) => [c.id, c])))), [ops]);
+  const held = heldOps(ops);
+  const stuck = ops.filter((o) => online && o.state === 'failed' && o.attempts >= 4 && !held.has(o.missionId));
+  if (!held.size && !stuck.length) return null;
+
+  async function discard(mine: QueuedOp[]) {
+    if (!confirm(`Discard ${mine.length} unsynced change${mine.length > 1 ? 's' : ''}? Download them first if you want a copy.`)) return;
+    for (const o of mine) await dismissOp(o.opId);
+  }
+
   return (
     <section className="notice warn" aria-labelledby="sync-problems">
       <h2 id="sync-problems" style={{ marginTop: 0 }}>
         Sync needs your attention
       </h2>
       <ul>
-        {problems.map((o) => (
-          <li key={o.opId}>
-            <strong>{label(o.type)}</strong> {o.type === 'observation' ? `(${label(o.payload.attribute)} = ${label(o.payload.value)})` : ''}:{' '}
-            {o.state === 'conflict' ? `the server refused this: ${o.lastError}` : `still failing after ${o.attempts} tries: ${o.lastError}`}
-            <div className="row" style={{ marginTop: '0.4rem' }}>
-              {o.state === 'failed' && (
-                <button type="button" onClick={() => void retryOp(o.opId).then(kick)}>
-                  Retry now
+        {[...held].map(([id, mine]) => {
+          const c = cached.get(id);
+          const why = c?.gone
+            ? 'this mission no longer exists on the server (unstarted missions expire after 7 days, or it was deleted).'
+            : c?.local.status === 'completed' || c?.local.status === 'cancelled'
+              ? `the server refused a change because the mission is ${c.local.status}.`
+              : 'the server refused a change.';
+          return (
+            <li key={id}>
+              <strong>{c?.mission.title ?? 'A mission'}</strong>: {why} These changes are kept on this device and not sent until you act:
+              <ul>
+                {mine.map((o) => (
+                  <li key={o.opId}>
+                    {opText(o)}: {o.state === 'conflict' ? `refused (${o.lastError})` : 'not sent yet'}
+                  </li>
+                ))}
+              </ul>
+              <div className="row" style={{ marginTop: '0.4rem' }}>
+                {!c?.gone && (
+                  <button type="button" onClick={() => void Promise.all(mine.map((o) => retryOp(o.opId))).then(kick)}>
+                    Try again
+                  </button>
+                )}
+                <button type="button" onClick={() => download(`shadeloop-unsynced-${id}.json`, { missionId: id, title: c?.mission.title ?? null, exportedAt: new Date().toISOString(), ops: mine })}>
+                  Download as JSON
                 </button>
-              )}
+                <button type="button" className="danger" onClick={() => void discard(mine)}>
+                  Discard these changes
+                </button>
+              </div>
+            </li>
+          );
+        })}
+        {stuck.map((o) => (
+          <li key={o.opId}>
+            <strong>{opText(o)}</strong>: still failing after {o.attempts} tries: {o.lastError}
+            <div className="row" style={{ marginTop: '0.4rem' }}>
+              <button type="button" onClick={() => void retryOp(o.opId).then(kick)}>
+                Retry now
+              </button>
               <button type="button" onClick={() => void dismissOp(o.opId)}>
                 Dismiss
               </button>
@@ -105,6 +162,16 @@ function SyncProblems() {
         ))}
       </ul>
     </section>
+  );
+}
+
+/** Shown instead of mission actions once the server says the mission is gone, so nothing more gets queued for it. */
+export function GoneNotice({ id }: { id: string }) {
+  return (
+    <p className="notice warn" role="status">
+      This mission no longer exists on the server: unstarted missions expire after 7 days, and it may have been deleted or belong to an older session. Any changes not yet synced stay on this device,
+      listed under “Sync needs your attention” where you can download them. <a href={`#/m/${id}`}>Mission details</a>
+    </p>
   );
 }
 
@@ -341,12 +408,7 @@ function MissionDetail({ id }: { id: string }) {
     const load = () => void getCached(id).then(setC);
     load();
     const unsub = subscribe(load);
-    if (navigator.onLine) {
-      api
-        .mission(id)
-        .then(cacheMission)
-        .catch((e: Error) => setError(e.message));
-    }
+    if (navigator.onLine) refreshMission(id, api.mission).catch((e: Error) => setError(e.message));
     return unsub;
   }, [id]);
 
@@ -414,8 +476,9 @@ function MissionDetail({ id }: { id: string }) {
           <li key={s}>{s}</li>
         ))}
       </ul>
+      {c.gone && <GoneNotice id={id} />}
       <div className="row" style={{ marginTop: '1.2rem' }}>
-        {local.status === 'planned' && (
+        {!c.gone && local.status === 'planned' && (
           <>
             <button className="primary" type="button" onClick={() => void start()}>
               Start in Field Mode
@@ -425,7 +488,7 @@ function MissionDetail({ id }: { id: string }) {
             </button>
           </>
         )}
-        {(local.status === 'active' || local.status === 'paused') && (
+        {!c.gone && (local.status === 'active' || local.status === 'paused') && (
           <button className="primary" type="button" onClick={() => go(`/field/${id}`)}>
             Continue in Field Mode
           </button>

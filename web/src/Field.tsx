@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { ATTRIBUTES, type Attribute, type Preferences, type Report } from '@shadeloop/shared';
 import { api } from './api.ts';
 import { enqueue, getCached, getMeta, subscribe, updateLocal, type CachedMission } from './store.ts';
-import { go, label, useSync } from './App.tsx';
+import { GoneNotice, go, label, useSync } from './App.tsx';
 
 function useCached(id: string) {
   const [c, setC] = useState<CachedMission | null | undefined>();
@@ -38,6 +38,7 @@ export function FieldMode({ id }: { id: string }) {
   const step = Math.min(local.currentStep, m.steps.length - 1);
   const pending = ops.filter((o) => o.missionId === id && o.state !== 'synced').length;
 
+  if (c.gone) return <GoneNotice id={id} />;
   if (local.status === 'planned') {
     return (
       <p className="notice">
@@ -242,6 +243,7 @@ export function Completion({ id }: { id: string }) {
     kick();
   }
 
+  if (c.gone && (local.status === 'active' || local.status === 'paused')) return <GoneNotice id={id} />;
   if (local.status === 'active' || local.status === 'paused') {
     return (
       <>

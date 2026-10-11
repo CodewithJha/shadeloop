@@ -67,6 +67,7 @@ export const RULES = {
   evidence: {
     moderateMinIndependent: 3,
     conflictMinorityShare: 1 / 3,
+    /** Distinct owners (each owner's latest report) considered per (location, attribute). */
     maxReportsConsidered: 500,
     freshnessDays: {
       bench_availability: 90,
@@ -85,6 +86,10 @@ export const RULES = {
     step_free: { attribute: 'step_free_access', accept: ['yes'] },
     smooth_path: { attribute: 'path_condition', accept: ['good'] },
   } as Record<Condition, { attribute: Attribute; accept: string[] }>,
+  /** Always shown as unverified with an explicit notice: no verified accessibility source exists, only anonymous reports. */
+  accessibilityConditions: ['step_free', 'bench', 'smooth_path'] as Condition[],
+  /** Per mission; excess observations are refused with 429 OBSERVATION_LIMIT. */
+  observationLimits: { perMission: 40, perAttribute: 10 },
   walkingTypes: ['mindful_walk', 'neighborhood_exploration'] as MissionType[],
   /** Phrases that make AI text unusable: trespass or medical advice. Matched case-insensitively on word boundaries. */
   unsafePatterns: [

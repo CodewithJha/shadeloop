@@ -62,7 +62,7 @@ async function ensureIndexes(d: Db) {
     d.collection('missions').createIndex({ expireAt: 1 }, { expireAfterSeconds: 0 }),
     d.collection('observations').createIndex({ opId: 1 }, { unique: true }),
     d.collection('observations').createIndex({ ownerId: 1, missionId: 1, clientTs: 1 }),
-    d.collection('observations').createIndex({ locationId: 1, attribute: 1, clientTs: -1 }),
+    d.collection('observations').createIndex({ locationId: 1, attribute: 1, ownerId: 1, serverTs: -1, _id: -1 }),
     d.collection('reports').createIndex({ missionId: 1 }, { unique: true }),
     d.collection('reports').createIndex({ ownerId: 1, createdAt: -1 }),
     d.collection('sync_records').createIndex({ opId: 1 }, { unique: true }),

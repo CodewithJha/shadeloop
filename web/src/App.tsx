@@ -11,7 +11,8 @@ export const go = (path: string) => {
 };
 
 const SOURCE_LABEL: Record<SourceType, string> = {
-  verified_external: 'external source',
+  verified_external: 'verified source',
+  external_map_data: 'map data',
   user_report: 'field report',
   inferred: 'rule',
   ai_suggestion: 'AI suggestion',
@@ -230,6 +231,7 @@ function MissionSummary({ m }: { m: Mission }) {
           {m.conditionChecks.map((c) => (
             <span key={c.condition} className={`tag ${CHECK_TONE[c.status] ?? ''}`}>
               {label(c.condition)}: {label(c.status)}
+              {c.provenance !== 'unknown' && c.verification !== 'verified' ? ' · unverified' : ''}
             </span>
           ))}
         </p>

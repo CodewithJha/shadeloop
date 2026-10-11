@@ -96,15 +96,23 @@ export function summarizeEvidence(attribute: Attribute, reports: EvidenceReport[
 
 /* ---------------- Conditions ---------------- */
 
-export function checkCondition(condition: Condition, required: boolean, ev?: Pick<EvidenceView, 'estimate' | 'confidence'>): ConditionCheck {
+export function checkCondition(
+  condition: Condition,
+  required: boolean,
+  ev?: Pick<EvidenceView, 'estimate' | 'confidence'> & Partial<Pick<EvidenceView, 'supporting' | 'contradicting'>>,
+): ConditionCheck {
   const { attribute, accept } = RULES.conditions[condition];
-  const base = { condition, required, attribute, confidence: ev?.confidence ?? 'unknown', estimate: ev?.estimate ?? null } as const;
+  const reports = (ev?.supporting ?? 0) + (ev?.contradicting ?? 0);
+  const provenance = !ev || ev.confidence === 'unknown' ? 'unknown' : reports === 1 ? 'user_report' : 'aggregated';
+  const base = { condition, required, attribute, confidence: ev?.confidence ?? 'unknown', estimate: ev?.estimate ?? null, provenance, verification: 'unverified' } as const;
   if (!ev || ev.confidence === 'unknown') return { ...base, status: 'unknown' };
   if (ev.confidence === 'stale' || ev.confidence === 'conflicting') return { ...base, status: ev.confidence };
   const ok = ev.estimate !== null && accept.includes(ev.estimate);
   if (ev.confidence === 'moderate') return { ...base, status: ok ? 'supported' : 'contradicted' };
   return { ...base, status: ok ? 'weak_support' : 'weak_against' };
 }
+
+export const isAccessibility = (c: Condition) => RULES.accessibilityConditions.includes(c);
 
 /** Merge explicit, parsed and preference-derived conditions. Required wins over preferred. */
 export function mergeConditions(prefs: Preferences, ...sources: { required?: Condition[]; preferred?: Condition[] }[]) {
@@ -206,7 +214,12 @@ export function validateCandidate(c: Candidate, ctx: PlanContext) {
 
   const uncertainty: string[] = [];
   for (const chk of conditionChecks) {
-    if (chk.status !== 'supported') {
+    if (isAccessibility(chk.condition) && chk.verification !== 'verified') {
+      uncertainty.push(
+        `${chk.required ? 'Required' : 'Preferred'} accessibility condition "${chk.condition}" is unverified (${chk.status.replace('_', ' ')}): ` +
+          'it rests only on anonymous reports, if any. Check access yourself before relying on it.',
+      );
+    } else if (chk.status !== 'supported') {
       uncertainty.push(`${chk.required ? 'Required' : 'Preferred'} condition "${chk.condition}" is not confirmed (${chk.status.replace('_', ' ')}).`);
     }
   }

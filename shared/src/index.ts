@@ -34,7 +34,11 @@ export type MissionStatus = (typeof MISSION_STATUSES)[number];
 export const MISSION_ACTIONS = ['start', 'pause', 'resume', 'complete', 'cancel'] as const;
 export type MissionAction = (typeof MISSION_ACTIONS)[number];
 
-export const SOURCE_TYPES = ['verified_external', 'user_report', 'inferred', 'ai_suggestion', 'aggregated'] as const;
+/**
+ * `verified_external` is reserved for a validated source (none is integrated). `external_map_data` is third-party
+ * crowd-sourced map data such as OpenStreetMap: attributed, not verified. `aggregated` = several anonymous reports.
+ */
+export const SOURCE_TYPES = ['verified_external', 'external_map_data', 'user_report', 'inferred', 'ai_suggestion', 'aggregated'] as const;
 export type SourceType = (typeof SOURCE_TYPES)[number];
 export const CONFIDENCE = ['unknown', 'low', 'moderate', 'conflicting', 'stale'] as const;
 export type Confidence = (typeof CONFIDENCE)[number];
@@ -181,6 +185,10 @@ export interface ConditionCheck {
   status: 'supported' | 'weak_support' | 'weak_against' | 'contradicted' | 'conflicting' | 'stale' | 'unknown';
   confidence: Confidence;
   estimate: string | null;
+  /** `unknown` (no reports), `user_report` (one anonymous session) or `aggregated` (several anonymous sessions). */
+  provenance: SourceType | 'unknown';
+  /** `verified` needs a `verified_external` source; none exists, so every check is `unverified`. */
+  verification: 'verified' | 'unverified';
 }
 
 export interface Step {

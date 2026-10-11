@@ -21,6 +21,7 @@ import { col, isDuplicateKey } from './db.ts';
 import {
   compareObservation,
   fitDurations,
+  isAccessibility,
   isEvidenceAttribute,
   mergeConditions,
   nextStatus,
@@ -65,7 +66,7 @@ export type ObservationDoc = {
   verificationStatus: 'unverified';
   privacy: 'location_linked' | 'mission_only';
 };
-type EvidenceDoc = EvidenceSummary & { locationId: string; updatedAt: Date };
+type EvidenceDoc = EvidenceSummary & { locationId: string; updatedAt: Date; computedAt?: number };
 
 const missions = () => col<MissionDoc>('missions');
 const observations = () => col<ObservationDoc>('observations');
@@ -100,24 +101,46 @@ function evidenceView(d: EvidenceDoc): EvidenceView {
 
 /* ---------------- Evidence ---------------- */
 
-// ponytail: concurrent writes to the same (location, attribute) can briefly leave a summary one report behind; the next write or read-time re-evaluation fixes it. Use a per-key queue if that matters.
+/**
+ * Full recompute from source observations: each owner's latest report (by server receipt) is picked inside the query,
+ * before the limit, so one owner's flood can't push other owners out. A write only lands if no recompute that started
+ * later has written already (`computedAt`), so an older snapshot never overwrites a newer one.
+ */
+// ponytail: `computedAt` is this host's clock; with several instances, clock skew could reorder near-simultaneous recomputes. Use a per-key counter if that matters.
 export async function recomputeEvidence(locationId: string, attribute: Attribute): Promise<EvidenceView | null> {
   if (!isEvidenceAttribute(attribute)) return null;
-  const obs = await observations()
-    .find({ locationId, attribute }, { projection: { ownerId: 1, value: 1, clientTs: 1 } })
-    .sort({ clientTs: -1 })
-    .limit(RULES.evidence.maxReportsConsidered)
+  const computedAt = performance.timeOrigin + performance.now();
+  const latest = await observations()
+    .aggregate<{ _id: string; value: string; clientTs: string }>([
+      { $match: { locationId, attribute } },
+      { $sort: { ownerId: 1, serverTs: -1, _id: -1 } },
+      { $group: { _id: '$ownerId', value: { $first: '$value' }, clientTs: { $first: '$clientTs' }, serverTs: { $first: '$serverTs' } } },
+      { $sort: { serverTs: -1, _id: 1 } },
+      { $limit: RULES.evidence.maxReportsConsidered },
+    ])
     .toArray();
-  if (!obs.length) {
-    await evidenceCol().deleteOne({ locationId, attribute });
+  const olderThanMe = { locationId, attribute, computedAt: { $not: { $gte: computedAt } } };
+  if (!latest.length) {
+    await evidenceCol().deleteOne(olderThanMe);
     return null;
   }
   const summary = summarizeEvidence(
     attribute,
-    obs.map((o) => ({ ownerId: o.ownerId, value: o.value, observedAt: new Date(o.clientTs) })),
+    latest.map((o) => ({ ownerId: o._id, value: o.value, observedAt: new Date(o.clientTs) })),
   );
-  const doc = { ...summary, locationId, updatedAt: new Date() };
-  await evidenceCol().updateOne({ locationId, attribute }, { $set: doc }, { upsert: true });
+  const doc = { ...summary, locationId, updatedAt: new Date(), computedAt };
+  try {
+    await evidenceCol().updateOne(olderThanMe, { $set: doc }, { upsert: true });
+  } catch (e) {
+    if (!isDuplicateKey(e)) throw e;
+    const newer = await evidenceCol().findOne({ locationId, attribute });
+    return newer && evidenceView(newer);
+  }
+  // A later recompute may have seen every observation deleted and removed the summary before we wrote ours back.
+  if (!(await observations().findOne({ locationId, attribute }, { projection: { _id: 1 } }))) {
+    await evidenceCol().deleteOne({ locationId, attribute, computedAt });
+    return null;
+  }
   return evidenceView(doc);
 }
 
@@ -137,7 +160,7 @@ export async function loadEvidence(locationIds: string[]): Promise<Map<string, M
 /* ---------------- Planning ---------------- */
 
 const CHECK_TEXT: Record<ConditionCheck['status'], string> = {
-  supported: 'supported by several independent field reports',
+  supported: 'supported by field reports from several separate anonymous sessions',
   weak_support: 'one or two reports suggest yes (low confidence)',
   weak_against: 'one or two reports suggest no (low confidence)',
   contradicted: 'field reports say no',
@@ -204,7 +227,12 @@ export async function planMissions(ownerId: string, input: PlanRequest) {
         name: l.name,
         category: l.category,
         maxStepMinutes: maxMinutes - (travelFor(l, prefs)?.minutesRoundTrip ?? 0),
-        evidence: Object.fromEntries([...(evidence.get(l.id)?.values() ?? [])].map((e) => [e.attribute, `${e.estimate ?? 'none'} (${e.confidence})`])),
+        evidence: Object.fromEntries(
+          [...(evidence.get(l.id)?.values() ?? [])].map((e) => [
+            e.attribute,
+            `${e.estimate ?? 'none'} (${e.confidence}, ${e.supporting + e.contradicting} unverified anonymous reports)`,
+          ]),
+        ),
       })),
     ],
     weather: weather?.available ? `${weather.temperatureC}°C, feels ${weather.apparentTemperatureC}°C, precipitation ${weather.precipitationMm} mm` : 'unknown',
@@ -285,11 +313,11 @@ export async function planMissions(ownerId: string, input: PlanRequest) {
       ...(v.aiText ? [{ text: v.aiText, sourceType: 'ai_suggestion' as const }] : [{ text: v.candidate.whyItMatches, sourceType: 'inferred' as const }]),
       { text: `Estimated ${v.estimatedMinutes} min fits your ${availableMinutes} min.`, sourceType: 'inferred' as const },
       ...v.conditionChecks.map((c) => ({
-        text: `${c.condition.replace('_', ' ')} (${c.required ? 'required' : 'preferred'}): ${CHECK_TEXT[c.status]}.`,
-        sourceType: c.status === 'unknown' ? ('inferred' as const) : ('aggregated' as const),
+        text: `${c.condition.replace('_', ' ')} (${c.required ? 'required' : 'preferred'}): ${CHECK_TEXT[c.status]}${c.verification === 'unverified' && isAccessibility(c.condition) ? ' (anonymous, not verified)' : ''}.`,
+        sourceType: c.provenance === 'unknown' ? ('inferred' as const) : c.provenance,
       })),
       ...(v.location && !v.location.isFixture
-        ? [{ text: `${v.location.name} is mapped as a ${v.location.category} (${v.location.attribution}).`, sourceType: 'verified_external' as const }]
+        ? [{ text: `${v.location.name} is mapped as a ${v.location.category} (${v.location.attribution}).`, sourceType: 'external_map_data' as const }]
         : []),
     ],
     provenance,
@@ -589,19 +617,34 @@ export async function addObservation(ownerId: string, missionId: string, input: 
     doc = prior;
     duplicate = true;
   }
+  const overLimit = !duplicate && (await overObservationLimit(doc));
   // The mission may have been completed or cancelled since the check above. The observation is kept only if the
   // mission is still open (so any later report reads it) or the mission's report already contains it.
   const now = await getMission(ownerId, doc.missionId);
-  const kept =
-    now.status === 'active' || now.status === 'paused' || (now.status === 'completed' && (await ensureReport(now)).observationIds?.includes(doc._id));
+  const open = now.status === 'active' || now.status === 'paused';
+  const kept = (open && !overLimit) || (now.status === 'completed' && (await ensureReport(now)).observationIds?.includes(doc._id));
   if (!kept) {
     await observations().deleteOne({ _id: doc._id });
     if (doc.locationId) await recomputeEvidence(doc.locationId, doc.attribute);
+    if (open) {
+      const { perMission, perAttribute } = RULES.observationLimits;
+      throw new AppError(429, 'OBSERVATION_LIMIT', `A mission accepts at most ${perMission} observations and ${perAttribute} per attribute`, { perMission, perAttribute });
+    }
     throw notActive(now.status);
   }
   if (duplicate) return { observation: doc, duplicate: true, evidence: null };
   const evidence = locationId ? await recomputeEvidence(locationId, input.attribute) : null;
   return { observation: doc, duplicate: false, evidence };
+}
+
+/**
+ * Counted after our own insert. Accepted rows are never removed by this check, so whichever accepted request counted
+ * last saw all of them: the cap can't be exceeded. Concurrent requests at the boundary may all be refused instead.
+ */
+async function overObservationLimit(doc: ObservationDoc) {
+  const q = { ownerId: doc.ownerId, missionId: doc.missionId };
+  const [all, same] = await Promise.all([observations().countDocuments(q), observations().countDocuments({ ...q, attribute: doc.attribute })]);
+  return all > RULES.observationLimits.perMission || same > RULES.observationLimits.perAttribute;
 }
 
 /* ---------------- Sync ---------------- */

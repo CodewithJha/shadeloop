@@ -1,6 +1,6 @@
 # Test plan
 
-Run everything: `npm run lint && npm run typecheck && npm test && npm run build`. Current counts: 97 server tests, 34 web tests.
+Run everything: `npm run lint && npm run typecheck && npm test && npm run build`. Current counts: 116 server tests, 35 web tests (also passing on Node 24.21, the production target, and Node 26.10 locally).
 
 ## Server unit tests (`server/test/unit.test.ts`)
 - State machine: allowed and rejected transitions.
@@ -19,9 +19,17 @@ Run everything: `npm run lint && npm run typecheck && npm test && npm run build`
 - Completion report summary: an AI mock that would say "busier than anticipated" is never called during completion or report reads; summary is the exact template text with `fallbackUsed: false`; timestamp duration used when the user gives none; identical text with AI disabled, unreachable, timing out or returning invalid output.
 - Lifecycle 409s; observations: not-active 409, invalid value 400, duplicate opId idempotent; note parsing proposes but doesn't save.
 - **End to end:** discovery → 4 sessions × (plan → start → observe → complete → report) → evidence goes from low to moderate; the next plan shows `contradicted` and comparisons report `observed_higher_than_expected`; a required-shade plan avoids the place; history; deleting one contributor recomputes evidence to `conflicting`.
-- Sync: batch applied, replay all duplicate with the same reportId, pause time excluded from duration, per-op conflicts, not-found rejected, cross-session opId rejected, future timestamps rejected.
+- Sync: batch applied, replay all duplicate with the same reportId, pause time excluded from duration, per-op conflicts, not-found rejected, cross-session opId rejected, future timestamps rejected. Per-op validation: an old-client `complete` with `actualMinutes` 300, an invalid observation value and an unknown type → only those `rejected / VALIDATION_ERROR`, valid ops (another mission's start, observation, complete) applied; resend → all `duplicate`, refusals kept; the refused completion redone under a new opId; malformed envelopes → 400, nothing applied.
 - Clock correction (`sentAt`): device clock 1 h ahead, 2 h behind, 1 day behind → start/observations/complete within 5 s of real time, spacing exact, raw kept in `clientTsRaw`, duration 20 min; a resend with a later `sentAt` → `duplicate`, stored times unchanged; a time before the plan clamps to its creation and one after the send clamps to now; malformed/missing `clientTs` or `sentAt` → 400; legacy (no `sentAt`) +4 min applied as sent, +6 min `CLOCK_SKEW`; direct start/observation/complete with `sentAt` corrected.
-- Durations: user minutes 241, 600, −1, 12.5 → 400 and the mission stays active; 240 and 0 kept as `user`; a 200 min mission kept from timestamps; completed 2 days after start → `minutes: null` and "actual duration unknown" summary; completedAt before startedAt → `null` on rebuild; analytics totals/averages only over trusted minutes (`minutesSampleSize`, `minutesExcluded`, average `null` below 5).
+- Durations: user minutes 241, 600, −1, 12.5 → 400 and the mission stays active; 240 and 0 kept as `user`; a 200 min mission kept from timestamps; completed 2 days after start → `minutes: null` and "actual duration unknown" summary; completedAt before startedAt → `null` on rebuild; analytics totals/averages only over trusted minutes (`minutesSampleSize`, `minutesExcluded`, average `null` below 5); a user estimate of 12 min keeps `measuredMinutes: 30` and analytics count it in `minutesUserEstimated`.
+
+## Reliability (`server/test/reliability.test.ts`, mongodb-memory-server, fetch mocked)
+- Indexes: `ensureIndexes` twice leaves the index set unchanged; `sync_records.ownerId` exists; the replaced observations index is never created; `explain` shows an index scan for the export `find` and delete `deleteMany` filter of missions, observations, reports, sync_records and preferences.
+- Provider cache: oldest entry evicted past the cap; TTL expiry; a hit keeps the original `retrievedAt`; Overpass keys ignore free-text queries.
+- Provider failures: 5xx retried once then success; repeated 504 or network errors stop after 2 calls with `DEGRADED`; 429 not retried and the provider not called again during `Retry-After`; a real timeout not retried; failed Overpass returns no places.
+- Planning starts discovery and weather before either finishes.
+- `/health/dependencies` twice → one AI probe; `lastSeenAt` not rewritten within the hour, rewritten after; CSP has `upgrade-insecure-requests` only in production.
+- Startup (child process): `NODE_ENV=production` + `MONGODB_URI=memory` exits 1 with the field message; unreachable MongoDB exits 1 with `startup failed` and without the password from the URI.
 - Preferences validation and effect on planning; analytics insufficient-data; export excludes owner IDs.
 
 ## Evidence integrity and accessibility (`server/test/evidence.test.ts`)
@@ -34,7 +42,7 @@ Run everything: `npm run lint && npm run typecheck && npm test && npm run build`
 - Three fresh sessions with zero-duration missions → required `step_free` is `supported` but `provenance: aggregated`, `verification: unverified`, with an uncertainty notice; place line is `external_map_data`; no `verified` label anywhere in the mission. A single report → `user_report`; no reports → `unknown`; non-accessibility conditions unchanged.
 
 ## Web unit tests (`web/src/store.test.ts`, fake-indexeddb)
-Queue persistence across reload, ordering, unique opIds, synced plus reportId hand-off, network backoff timing, 429 `Retry-After` respected, 5xx recoverable vs 4xx conflict, per-op conflict surfaced and only removed by dismissal, stuck `syncing` reset.
+Queue persistence across reload, ordering, unique opIds, a per-op `VALIDATION_ERROR` becoming a conflict for that op only (other missions sync, later ops of that mission held), synced plus reportId hand-off, network backoff timing, 429 `Retry-After` respected, 5xx recoverable vs 4xx conflict, per-op conflict surfaced and only removed by dismissal, stuck `syncing` reset.
 Per-mission ordering: an observation never overtakes a `start` that is backing off (503, 429, timeout, `retry`, missing result), the pair resumes in order once due, other missions aren't held, a mid-batch `retry` resumes in order. Same-opId resend after a lost response (no duplicate local observation); stored refusal returned as `duplicate` stays a conflict. No concurrent flush within a tab or while another tab holds the Web Lock. `syncing` op recovered after a reload. Reconciliation: server state adopted when nothing is queued, local kept while ops are queued, refetch after a refusal, 404 → mission `gone`, no further sends, ops kept and serialisable for export.
 
 ## Web API client tests (`web/src/api.test.ts`, mocked fetch + fake-indexeddb)
@@ -48,6 +56,7 @@ Re-run later the same day on the production build served by the API: one observa
 ## Manual API and container checks (2026-10-11)
 - curl over the whole loop with `AI_PROVIDER=none` and with `ollama` (gemma3:4b): plan → start → observation → sync → complete → report → history → analytics. Repeating an observation opId and repeating `/sync` ops (observation and complete) returned `duplicate` with the same `reportId`, and nothing was stored twice. The server logs contained no token, coordinates, prompt, note or feedback text.
 - Docker: the image builds and runs with `NODE_ENV=production` against a `mongo:8` container. Health, the PWA and fixture planning worked, and `MONGODB_URI=memory` was refused.
+- Docker, again after the deployment changes (built with `--no-cache` from a clean export of the tree): 271 MB, runtime `node_modules` 24 MB with no react/react-dom/idb/vite/mongodb-memory-server, no `.env` in the image, user `node`. Against `mongo:8`: `HEALTHCHECK` reported `healthy`, `mongodb: VERIFIED`, `sync_records.ownerId_1` created, production CSP includes `upgrade-insecure-requests`, a `/sync` batch with an `actualMinutes: 500` complete returned `applied` + `rejected / VALIDATION_ERROR`; `docker stop` logged `SIGTERM` → `shutdown complete`, exit 0. `MONGODB_URI=memory` → exit 1; unreachable Mongo → `startup failed: …` (host only), exit 1.
 
 ## Not covered
 Playwright browser e2e (not added), screen-reader pass, Web Speech paths, Atlas, SerpApi, OpenAI-compatible provider.

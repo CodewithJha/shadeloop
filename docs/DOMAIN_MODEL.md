@@ -3,7 +3,7 @@
 Types live in `shared/src/index.ts`; rules live in `server/src/domain.ts` and `server/src/config.ts` (`RULES`).
 
 ## Entities
-- **Owner**: anonymous session. `{_id: uuid, tokenHash: sha256(token), createdAt, lastSeenAt}`.
+- **Owner**: anonymous session. `{_id: uuid, tokenHash: sha256(token), createdAt, lastSeenAt}`. `lastSeenAt` is updated at most once an hour. Owners never expire (ARCHITECTURE.md → Indexes).
 - **UserPreferences**: `missionTypes[], defaultMinutes, timeOfDay, maxWalkMinutes, walkingPace, accessibility{stepFreeRequired, needsSeating, avoidCrowds}, language('en'), voice{readStepsAloud, voiceNotes}, privacy{useCoarseLocation}`, plus timestamps. `stepFreeRequired` makes `step_free` required, `needsSeating` makes `bench` required, `avoidCrowds` makes `not_crowded` preferred. `timeOfDay` is only a hint to the AI.
 - **Mission**: id, title, description, type, objective, availableMinutes, estimatedMinutes, walkingMinutes, constraints{required, preferred}, conditionChecks, candidateLocations, selectedLocation, travel (straight-line, approximate), `route: null` (no routing), steps[{text, minutes, kind: walk|still|observe}] (the duration is only in `minutes`; mission text never states one), observationPrompts, safetyNotes, expectations, weather, whyItMatches[{text, sourceType}], provenance{generator, provider, model, fallbackUsed, fallbackReason}, uncertainty[], status, session, reportId, createdAt, version. `reportId` is generated and stored by the completion update itself, before the report exists. Internal (not in API responses): `appliedOpIds` (last 100 applied opIds) and `feedback{rating, text}` (saved at completion so the report can be rebuilt).
 - **MissionSession** (embedded as `mission.session`): id, startedAt, pausedAt, totalPausedMs, completedAt, cancelledAt, currentStep, completionStatus (completed|partial), userMinutes, lastEventAt. Every time here is an event time (see Timestamps). Sync state lives on the client queue.
@@ -22,9 +22,10 @@ Evidence freshness, report observation times and durations use the event time. "
 
 ## Durations
 `MAX_ACTUAL_MINUTES` = 240 (`shared/src/index.ts`, `RULES.maxActualMinutes`), the longest plan budget.
-- User-entered `actualMinutes`: integer 0–240, otherwise 400 `VALIDATION_ERROR`. Used as given (`minutesSource: user`).
+- User-entered `actualMinutes`: integer 0–240, otherwise 400 `VALIDATION_ERROR` (via `/sync`: that op alone is `rejected / VALIDATION_ERROR`). Used as given (`minutesSource: user`), labelled "your estimate" in the UI.
 - Otherwise from timestamps: completedAt − startedAt − paused time, all event times. Below 0 or above 240 (e.g. left running and completed days later, or inconsistent stored times) → `minutes: null`, still `minutesSource: timestamps`, and the summary says "actual duration unknown".
-- Analytics totals and averages count only reports with minutes in 0–240 and report how many were excluded; the average stays `null` below 5 such reports.
+- `measuredMinutes` keeps the timestamp duration (or `null`) on every report, so an estimate is shown next to what was measured ("12 (your estimate; measured 30)"). The estimate is not replaced or flagged: people enter minutes exactly when the timestamps are wrong (forgot to end the mission), so neither value is assumed right.
+- Analytics totals and averages count only reports with minutes in 0–240 and report how many were excluded and how many of the counted ones are user estimates (`minutesUserEstimated`); the average stays `null` below 5 such reports.
 
 ## Attributes (value order low → high)
 `bench_availability` not_found<found · `shade_quality` none<partial<good · `noise_level` quiet<moderate<loud · `crowding` empty<some_people<busy · `path_condition` blocked<uneven<good · `step_free_access` no<yes · `temperature_feel` cooler_than_expected<as_expected<hotter_than_expected (report-only, not location evidence).

@@ -85,9 +85,17 @@ There are 84 server tests (unit and integration, including an end-to-end field-t
 
 ## Deployment
 
-- **Render:** `render.yaml` defines one web service that serves the API and PWA. Set `MONGODB_URI` (Atlas) in the dashboard.
-- **Docker:** `docker build -t shadeloop . && docker run -p 8080:8080 -e MONGODB_URI=... shadeloop`. Built and run locally against a `mongo:8` container. Not yet deployed to Render or Atlas.
-- **CI:** `.github/workflows/ci.yml` runs lint, typecheck, test and build.
+- **Render:** `render.yaml` defines one web service that serves the API and PWA on Node 24. Set `MONGODB_URI` (Atlas) in the dashboard. `TRUST_PROXY=1` assumes exactly one proxy hop in front of the app (rate limits use the client IP from `X-Forwarded-For`); this was not verified on Render.
+- **Docker:** `docker build -t shadeloop . && docker run -p 8080:8080 -e NODE_ENV=production -e MONGODB_URI=... shadeloop`. Two stages: the build stage installs everything and builds the PWA; the runtime stage (`node:24-alpine`, user `node`) installs only the server's production dependencies (`npm ci --omit=dev --workspace=server`) and copies `server/src`, `shared/src` and `web/dist`. No `.env` file is copied (`.dockerignore`). A `HEALTHCHECK` calls `/api/v1/health` with Node's `fetch` (no curl in the image). Built from a clean checkout and run against a `mongo:8` container on 2026-10-11 (271 MB). Not yet deployed to Render or Atlas.
+- **CI:** `.github/workflows/ci.yml` on Node 24 (the production target): lint, typecheck, tests, PWA build, `npm audit --omit=dev --audit-level=high`, and a Docker image build (never pushed). No credentials or paid APIs: tests mock every external call and use mongodb-memory-server, whose binary is cached between runs.
+
+### Operations
+- **Startup:** invalid env exits 1 listing the field names (never values). Production refuses `MONGODB_URI=memory`. If MongoDB is unreachable or index creation fails, the process logs `startup failed: …` (hosts only) and exits 1. Optional integrations (AI, SerpApi) are never required.
+- **Health:** `GET /api/v1/health` is liveness only (no DB or network call). `GET /api/v1/health/dependencies` pings MongoDB and reuses one AI probe for 60 s; place and weather statuses come from the last real call, so the public endpoint can't be used to drive provider traffic.
+- **Shutdown:** SIGTERM/SIGINT stop accepting connections, close the HTTP server and the Mongo client, log `shutdown complete` and exit 0; anything still open after 10 s is cut off with exit 1.
+- **Indexes:** created at every start, never dropped automatically. See docs/ARCHITECTURE.md → Indexes for the one obsolete index to drop by hand on databases created before 2026-10-11.
+- **Headers:** helmet defaults; the CSP's `upgrade-insecure-requests` is sent only in production, so a dev or LAN build over plain HTTP (e.g. `http://192.168.x.x:8080` on a phone) still loads its scripts.
+- **Logs:** pino JSON. Request logs carry only id, method, URL and status; tokens, coordinates, note/prompt/feedback text and API keys are redacted.
 
 ## Demo
 
@@ -110,8 +118,9 @@ For a demo without network discovery, set `DISCOVERY_MODE=fixture`. Places are t
 - English only. Voice uses browser APIs only (Web Speech), where supported.
 - Offline changes the server refuses (for example observations for a mission that expired or was cancelled elsewhere) can't be applied. They stay on the device, held per mission, until you download or discard them. There is no merge.
 - Device clocks are corrected per sync request from the time the device says it sent it, so a wrong clock no longer loses data. Corrected times can be late by the request latency, and changing the device clock between recording and syncing shifts those events (they are clamped between the previous event and now). Clients without `sentAt` keep the old 5-minute rule.
-- Durations: you can enter 0–240 minutes; a duration measured from timestamps that is negative or over 240 minutes (e.g. a mission left running for days) is shown as unknown and left out of your totals. Entered minutes are not cross-checked against the measured time.
-- One invalid op in a sync batch (e.g. from an older app version) fails the whole request with 400, and the queue then holds every op of that batch as a conflict for you to retry or discard.
+- Durations: you can enter 0–240 minutes; a duration measured from timestamps that is negative or over 240 minutes (e.g. a mission left running for days) is shown as unknown and left out of your totals. Entered minutes are labelled as your estimate and the report shows the measured time next to them, but they aren't corrected or flagged when the two differ; totals use your estimate and say how many estimates they include.
+- A sync op the server can't accept (e.g. a value an older app version allowed) is refused on its own and kept on the device as a conflict; the rest of the batch is applied. Only a malformed batch (missing opId, bad timestamps) is refused as a whole.
+- Anonymous owners never expire, and the place/weather cache and 429 back-off are per process (see docs/ARCHITECTURE.md).
 - The repo lives at `~/ShadeLoop` (see docs/DECISIONS.md, item 0).
 
 ## License

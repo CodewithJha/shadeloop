@@ -19,8 +19,8 @@ Codes: `VALIDATION_ERROR` 400, `INVALID_JSON` 400, `CLOCK_SKEW` 400 (only for re
 ## Endpoints
 | Method & path | Notes |
 |---|---|
-| `GET /health` | Liveness |
-| `GET /health/dependencies` | Integration registry: `{status, dependencies[{name, role, status, detail, lastCall}], notImplemented[]}`. 503 if Mongo is down |
+| `GET /health` | Liveness (no DB or network call) |
+| `GET /health/dependencies` | Integration registry: `{status, dependencies[{name, role, status, detail, lastCall}], notImplemented[]}`. 503 if Mongo is down. Pings Mongo; the AI probe is reused for 60 s; place/weather statuses come from the last real call (no provider is called) |
 | `POST /sessions` | New anonymous session |
 | `POST /discovery/search` | `{lat, lon, radiusM?, query?}` → `{locations[], sources[], mode, limitations[]}`. Coordinates are rounded to 2 decimals before any external call. 503 if every live source fails |
 | `POST /missions/plan` | `{prompt?, availableMinutes?, missionType?, required?, preferred?, coarseLocation?, locationIds?}` → `201 {planId, missions[], planning{constraints, parse, generation, weather, discovery}}` |
@@ -33,9 +33,9 @@ Codes: `VALIDATION_ERROR` 400, `INVALID_JSON` 400, `CLOCK_SKEW` 400 (only for re
 | `POST /missions/:id/observations/parse` | `{text}` → proposed observations `{proposals, method: ai\|keywords, ...}`. **Nothing is saved, and the text is not stored** |
 | `POST /sync` | `{ops: [{opId, missionId, clientTs, type, payload?}], sentAt?}` (≤ 50, applied in order; `sentAt` = the client's clock when it sent this request) → `{results: [{opId, status: applied\|duplicate\|conflict\|rejected\|retry, result?, error?}]}` |
 | `GET /history?page&limit` | Completed and cancelled missions with report summaries |
-| `GET /reports/:id` | Completion report. Rebuilt on read if the mission is completed but its report is missing. `actual.minutesSource` is `user` (entered, 0–240) or `timestamps`; a timestamp duration that is negative or over 240 min is `actual.minutes: null` ("actual duration unknown" in the summary) |
+| `GET /reports/:id` | Completion report. Rebuilt on read if the mission is completed but its report is missing. `actual.minutesSource` is `user` (the user's own estimate, 0–240, not checked against the clock) or `timestamps` (measured); a timestamp duration that is negative or over 240 min is `actual.minutes: null` ("actual duration unknown" in the summary). `actual.measuredMinutes` is the timestamp duration (or `null`) even when the user gave an estimate; absent on reports stored before 2026-10-11 |
 | `GET /preferences`, `PUT /preferences` | PUT takes the full object (strict) |
-| `GET /analytics/overview` | Counts plus `completionRate` / `averageMinutes`, which are `null` until 5 samples, with `insufficientData`. `totalMinutesOutside` and `averageMinutes` use only reports with a trusted duration (0–240 min): `minutesSampleSize` of them, `minutesExcluded` left out (`null` minutes, or over-cap values stored by older versions) |
+| `GET /analytics/overview` | Counts plus `completionRate` / `averageMinutes`, which are `null` until 5 samples, with `insufficientData`. `totalMinutesOutside` and `averageMinutes` use only reports with a trusted duration (0–240 min): `minutesSampleSize` of them, `minutesUserEstimated` of which are the user's own estimates rather than measured, `minutesExcluded` left out (`null` minutes, or over-cap values stored by older versions) |
 | `GET /analytics/attributes` | Per attribute: value counts, matched/differed counts, `expectationMatchRate` (`null` until 5 comparisons) |
 | `GET /me/export` | All of the caller's data as JSON (without internal owner IDs) |
 | `DELETE /me` | Deletes everything owned by the session and the session itself, then recomputes affected shared evidence |
@@ -47,7 +47,9 @@ Codes: `VALIDATION_ERROR` 400, `INVALID_JSON` 400, `CLOCK_SKEW` 400 (only for re
 - A server error (5xx) aborts the batch and stores nothing for the failing op, so the client retries it. Ops that were already applied dedupe.
 - An opId used by another session → `rejected / OPID_CONFLICT`. The other session's result is never returned.
 - An observation over the per-mission cap → `rejected / OBSERVATION_LIMIT`. It's final: a resend returns `duplicate` with `originalStatus: rejected`.
-- A schema-invalid op (bad `clientTs`, `actualMinutes` over 240, …) fails the whole request with 400 `VALIDATION_ERROR`; nothing in it is applied.
+- Validation is two-level. The request envelope must be valid or the whole request is 400 `VALIDATION_ERROR` and nothing is applied: `ops` is an array of 1–50, no unknown top-level keys, `sentAt` (if sent) is an ISO time, and every op has a UUID `opId`, a `missionId` (≤ 100 chars), a `type` string (≤ 20) and an ISO `clientTs`. Everything else (known `type`, `payload` shape and values such as `actualMinutes` 0–240 or an observation value) is checked per op: an invalid op comes back `rejected / VALIDATION_ERROR` with `details [{path, message}]` and the other ops are applied as usual. The refusal is stored like any other, so a resend returns `duplicate` with `originalStatus: rejected`.
+- Ops are judged one at a time against the mission's current state; a refused op doesn't stop later ops of its mission in the same request. Ops that needed it are refused by the state machine themselves (e.g. an observation after a refused `start` → `conflict / MISSION_NOT_ACTIVE`), and ops that didn't (e.g. a valid observation after an invalid one) are applied. The client queue holds back a mission's *unsent* ops behind a refusal (OFFLINE_SYNC.md).
+- Compatibility: clients built before 2026-10-11 may omit `sentAt` (legacy 5-minute rule, see Timestamps) and may send values today's schema refuses, such as `actualMinutes` 241–600; both are handled per op. The request schema in OpenAPI (`SyncRequest`) is unchanged and is what clients should send.
 
 ## Timestamps
 - With `sentAt` (sync, transitions, observations): the server computes `offset = serverNow − sentAt` once per request and moves every `clientTs` in it by that offset, so a device clock that is hours or days off lands on the server clock. One offset per batch keeps the ops' order and spacing. The correction overstates by the request's latency (time between the client stamping `sentAt` and the server reading it, including a session renewal), so corrected times can be that much late. The result is then clamped to `[previous event, serverNow]` (previous event = the mission's last transition, or its creation; for observations, its start). Nothing is refused for being out of range after correction.

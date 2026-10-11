@@ -59,7 +59,7 @@ export function Settings() {
         const c = { lat: Math.round(pos.coords.latitude * 100) / 100, lon: Math.round(pos.coords.longitude * 100) / 100 };
         await setMeta('coarse', c);
         setCoarse(c);
-        set({ privacy: { ...prefs.privacy, useCoarseLocation: true } });
+        setPrefs((p) => p && { ...p, privacy: { ...p.privacy, useCoarseLocation: true } });
         setLocMsg('Approximate location saved on this device. Save preferences to record your consent.');
       },
       (err) => setLocMsg(`Location not available: ${err.message}`),
@@ -70,7 +70,7 @@ export function Settings() {
   async function forgetLocation() {
     await delMeta('coarse');
     setCoarse(undefined);
-    set({ privacy: { ...prefs.privacy, useCoarseLocation: false } });
+    setPrefs((p) => p && { ...p, privacy: { ...p.privacy, useCoarseLocation: false } });
     setLocMsg('Location removed from this device.');
   }
 

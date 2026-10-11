@@ -68,4 +68,4 @@ Re-run later the same day on the production build served by the API: one observa
 Automated (mocked): Gemma 4 `<thought>` stripping, the ElevenLabs speech endpoint, the Tiger hourly endpoint without a URL and its time-zone check, and Backboard memory. Verified live by hand: Gemma 4 on AI Studio, Atlas, Sentry agent traces, ElevenLabs audio, Tiger Data writes and reads, Backboard recall and save.
 
 ## Not covered
-Playwright browser e2e (not added), screen-reader pass, Web Speech paths, SerpApi, Tiger Data against a real database in CI, Render. In a browser: the PWA update prompt, install on Android/iOS, and the mobile layout fixes of 2026-10-11 (only Discover at 320×640 was looked at before them).
+Playwright browser e2e (not added), screen-reader pass, Web Speech paths, SerpApi, Tiger Data against a real database in CI. On Render (live since 2026-10-11) only MongoDB and Gemma 4 have been called; the other integrations there are configured but not yet exercised. In a browser: the PWA update prompt, install on Android/iOS, and the mobile layout fixes of 2026-10-11 (only Discover at 320×640 was looked at before them).

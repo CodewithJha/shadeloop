@@ -95,6 +95,12 @@ Any other OpenAI-compatible chat-completions API works through the same `openai`
 - **Failure:** `weather.available: false` with a reason; the mission tells the user to check conditions themselves.
 - **Evidence:** VERIFIED live (e.g. 29.8 °C / feels 30.3 °C, retrieved with timestamp).
 
+## Render (hosting)
+- **Role:** runs the production Docker image (API plus PWA) at https://shadeloop.onrender.com. Service `srv-db5r54m7bikc73dpa4rg`, free plan, Singapore, auto-deploy from `main`.
+- **Code:** `render.yaml` (`runtime: docker`, health check `/api/v1/health`, env vars; secrets are `sync: false` and set in the dashboard), `Dockerfile`.
+- **Failure:** the free plan sleeps when idle, so the first request after a quiet spell waits for a cold start (up to about a minute).
+- **Evidence:** live on 2026-10-11. `/health/dependencies` there showed `mongodb` and `ai:openai` (Gemma 4) `VERIFIED`; Sentry, Tiger Data, Backboard, ElevenLabs and SerpApi were `CONFIGURED` (keys set, no call made yet on Render). `TRUST_PROXY=1` (one proxy hop) is not verified there.
+
 ## Fixture discovery
 - **Role:** demos without network. `DISCOVERY_MODE=fixture` returns 3 places named "Sample … (fixture)", with `isFixture: true`, no coordinates, and the attribution "Not a real place". The UI badges them.
 - **Status:** DISABLED unless explicitly enabled.

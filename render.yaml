@@ -1,20 +1,13 @@
 services:
   - type: web
     name: shadeloop
-    runtime: node
+    runtime: docker # the Dockerfile builds the PWA and starts the server with Sentry preloaded
     plan: free
     region: singapore
-    # Dev dependencies (vite) are needed to build the PWA even though NODE_ENV=production.
-    buildCommand: npm ci --include=dev && npm run build
-    startCommand: npm start
     healthCheckPath: /api/v1/health
     envVars:
-      - key: NODE_VERSION
-        value: "24"
       - key: NODE_ENV
         value: production
-      - key: MONGOMS_DISABLE_POSTINSTALL # skip the test-only mongod download (~100 MB) during npm ci
-        value: "1"
       - key: TRUST_PROXY
         value: "1"
       - key: MONGODB_URI

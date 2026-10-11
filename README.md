@@ -2,6 +2,8 @@
 
 **Go outside. Discover more. Make every walk count.**
 
+Live: https://shadeloop.onrender.com (Render free plan: the first visit after it has been idle can take about a minute to wake up).
+
 ShadeLoop is an open-source outdoor field companion. It proposes short outdoor missions (5–120 min) that a deterministic rule engine has checked. You run them in an offline-capable Field Mode and record what you actually find. Those reports feed a shared, explainable evidence model that makes the next recommendations more honest.
 
 ## The problem
@@ -51,6 +53,7 @@ Every integration except MongoDB is optional and degrades to a labelled fallback
 | Tiger Data (TimescaleDB) | Hypertable of place observations and a 15-minute continuous aggregate behind "Reports here by time of day" |
 | Backboard | Opt-in memory of your own past requests, used when planning |
 | OpenStreetMap Overpass, SerpApi, Open-Meteo | Places and weather (SerpApi is wired but not verified live) |
+| Render | Hosts the Docker image at https://shadeloop.onrender.com (free plan, so the first request after idle is slow) |
 
 The AI never writes to the database, decides safety, invents places or weather, or overrides the engine. See [docs/AI_POLICY.md](docs/AI_POLICY.md).
 
@@ -122,7 +125,7 @@ There are 121 server tests (unit and integration, including an end-to-end field-
 
 ## Deployment
 
-- **Render:** `render.yaml` defines one web service (Singapore region) that serves the API and PWA on Node 24, with Gemma 4 on AI Studio as the AI provider. Set the secrets in the dashboard: `MONGODB_URI` (Atlas), `OPENAI_API_KEY` (AI Studio), and optionally `SERPAPI_KEY`, `SENTRY_DSN`, `ELEVENLABS_API_KEY`, `TIGER_DATABASE_URL`, `BACKBOARD_API_KEY`. `TRUST_PROXY=1` assumes exactly one proxy hop in front of the app (rate limits use the client IP from `X-Forwarded-For`); this was not verified on Render.
+- **Render:** live at https://shadeloop.onrender.com (free plan, Singapore, auto-deploys from `main`). `render.yaml` defines one Docker web service built from the `Dockerfile` below, serving the API and PWA, with Gemma 4 on AI Studio as the AI provider and `/api/v1/health` as the health check. The free plan sleeps when idle, so the first request after a quiet spell can take a minute while it starts. On 2026-10-11 `/health/dependencies` showed `mongodb` and Gemma `VERIFIED` (Atlas), and Sentry, Tiger Data, Backboard, ElevenLabs and SerpApi `CONFIGURED` (keys set, not yet called on Render). Set the secrets in the dashboard: `MONGODB_URI` (Atlas), `OPENAI_API_KEY` (AI Studio), and optionally `SERPAPI_KEY`, `SENTRY_DSN`, `ELEVENLABS_API_KEY`, `TIGER_DATABASE_URL`, `BACKBOARD_API_KEY`. `TRUST_PROXY=1` assumes exactly one proxy hop in front of the app (rate limits use the client IP from `X-Forwarded-For`); this was not verified on Render.
 - **Docker:** `docker build -t shadeloop . && docker run -p 8080:8080 -e NODE_ENV=production -e MONGODB_URI=... shadeloop`. Two stages: the build stage installs everything and builds the PWA; the runtime stage (`node:24-alpine`, user `node`) installs only the server's production dependencies (`npm ci --omit=dev --workspace=server`) and copies `server/src`, `shared/src` and `web/dist`. No `.env` file is copied (`.dockerignore`). A `HEALTHCHECK` calls `/api/v1/health` with Node's `fetch` (no curl in the image). Built from a clean checkout and run against a `mongo:8` container on 2026-10-11 (271 MB).
 - **CI:** `.github/workflows/ci.yml` on Node 24 (the production target): lint, typecheck, tests, PWA build, `npm audit --omit=dev --audit-level=high`, and a Docker image build (never pushed). No credentials or paid APIs: tests mock every external call and use mongodb-memory-server, whose binary is cached between runs.
 

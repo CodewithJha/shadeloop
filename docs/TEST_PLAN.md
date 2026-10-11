@@ -26,5 +26,11 @@ Queue persistence across reload, ordering, unique opIds, synced plus reportId ha
 ## Manual (performed 2026-10-11, Chromium via Cursor browser, 390×844 emulation)
 Settings location opt-in (emulated geolocation, rounded) → Discover with Ollama/gemma3:4b live → Mission detail → Start → Field Mode → offline emulation → 2 observations → offline reload (shell and mission load, queue intact) → online → queue synced → Finish → report summary by gemma3:4b.
 
+Re-run later the same day on the production build served by the API: one observation online, one offline, offline reload, reconnect. The queue drained right away, the server held exactly 2 observations, and the console showed no errors.
+
+## Manual API and container checks (2026-10-11)
+- curl over the whole loop with `AI_PROVIDER=none` and with `ollama` (gemma3:4b): plan → start → observation → sync → complete → report → history → analytics. Repeating an observation opId and repeating `/sync` ops (observation and complete) returned `duplicate` with the same `reportId`, and nothing was stored twice. The server logs contained no token, coordinates, prompt, note or feedback text.
+- Docker: the image builds and runs with `NODE_ENV=production` against a `mongo:8` container. Health, the PWA and fixture planning worked, and `MONGODB_URI=memory` was refused.
+
 ## Not covered
-Playwright browser e2e (not added), screen-reader pass, Web Speech paths, Atlas, SerpApi, OpenAI-compatible provider, Docker image run (see the final report for build status).
+Playwright browser e2e (not added), screen-reader pass, Web Speech paths, Atlas, SerpApi, OpenAI-compatible provider.

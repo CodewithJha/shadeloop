@@ -86,7 +86,7 @@ There are 49 server tests (unit and integration, including an end-to-end field-t
 ## Deployment
 
 - **Render:** `render.yaml` defines one web service that serves the API and PWA. Set `MONGODB_URI` (Atlas) in the dashboard.
-- **Docker:** `docker build -t shadeloop . && docker run -p 8080:8080 -e MONGODB_URI=... shadeloop`.
+- **Docker:** `docker build -t shadeloop . && docker run -p 8080:8080 -e MONGODB_URI=... shadeloop`. Built and run locally against a `mongo:8` container. Not yet deployed to Render or Atlas.
 - **CI:** `.github/workflows/ci.yml` runs lint, typecheck, test and build.
 
 ## Demo
@@ -104,7 +104,7 @@ For a demo without network discovery, set `DISCOVERY_MODE=fixture`. Places are t
 - No real auth: anonymous bearer-token sessions only. Clearing site data loses access to your missions.
 - No routing. Distances are straight-line from a coarse (about 1 km) location, and travel time is an estimate.
 - Evidence needs several independent sessions to reach `moderate`. Sessions are not identities, so one person with many sessions can skew it.
-- Small local models (gemma3:4b) often overshoot time budgets. The engine shortens or rejects them, then falls back to templates. AI summaries can over-state; the comparison table is the deterministic source of truth.
+- Small local models (gemma3:4b) often overshoot time budgets. The engine shortens or rejects them, then falls back to templates. AI summaries can over-state (e.g. "busier than anticipated" with no prior reports), and AI step text may still mention the original duration after the engine shortened it. The comparison table and step durations are the deterministic source of truth.
 - The public Overpass API is sometimes slow or returns 504. Planning then proceeds without named places and says so.
 - English only. Voice uses browser APIs only (Web Speech), where supported.
 - The repo lives at `~/ShadeLoop` (see docs/DECISIONS.md, item 0).

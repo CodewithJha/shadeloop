@@ -21,7 +21,7 @@ Built for the DEV [Hacktoberfest Open-Source AI Challenge, Week 1: Touch Grass](
 | **MongoDB Atlas** | Source of truth for missions, observations, reports and the shared evidence model | `server/src/db.ts`, `server/src/missions.ts` |
 | **Process log** | Every plan returns an additive `planning.log` (step, ok, start offset, duration, detail) recorded around the same tool calls Sentry traces: memory recall, weather, places per source, Gemma drafting, each rule-engine accept or refusal, template fallback, memory save. Discover shows it as a field log | `logged` in `server/src/missions.ts`, `ProcessLog` in `web/src/App.tsx` |
 | **Visible in the app** | Every plan shows a “what ran” strip: which model read the request and drafted, that the rule engine checked it, which place sources returned how many results, weather, and Backboard recall. Only things that actually ran are listed | `FieldKit` in `web/src/App.tsx` |
-| **GitHub Copilot / Actions** | CI on every push (lint, typecheck, 124 server + 38 web tests, PWA build, audit, Docker build); Copilot issue #1 fixed in commit `89b8ead` | `.github/workflows/ci.yml` |
+| **GitHub Copilot / Actions** | CI on every push (lint, typecheck, 129 server + 43 web tests, PWA build, audit, Docker build); Copilot issue #1 fixed in commit `89b8ead` | `.github/workflows/ci.yml` |
 | **Entire** | Agent session behind a real fix: https://entire.io/gh/CodewithJha/shadeloop/commit/89b8eada487181a88134341db161312060d1bce4 | |
 | **SerpApi** | Google Maps place results next to OpenStreetMap; verified live 2026-10-12 (20 places) | `server/src/providers.ts` |
 
@@ -78,7 +78,7 @@ flowchart LR
     Plan --> FB[Deterministic templates]
     Plan --> Engine[Constraint engine]
     Plan --> Disc[Discovery: Overpass, SerpApi, fixture]
-    Plan --> Wx[Open-Meteo]
+    Plan --> Wx[Open-Meteo, falls back to MET Norway]
     Plan --> Mem[Backboard memory, opt-in]
     API --> Ev[Evidence model]
     API --> TTS[ElevenLabs voice]
@@ -98,7 +98,7 @@ Every integration except MongoDB is optional and degrades to a labelled fallback
 | ElevenLabs | Reads mission steps aloud (`eleven_flash_v2_5`), cached; browser voice offline |
 | Tiger Data (TimescaleDB) | Hypertable of place observations and a 15-minute continuous aggregate behind "Reports here by time of day" |
 | Backboard | Opt-in memory of your own past requests, used when planning |
-| OpenStreetMap Overpass, SerpApi, Open-Meteo | Places and weather (SerpApi is wired but not verified live) |
+| OpenStreetMap Overpass, SerpApi, Open-Meteo, MET Norway | Places and weather (SerpApi verified live: 20 places; MET Norway covers Open-Meteo 429s, verified live) |
 | Render | Hosts the Docker image at https://shadeloop.onrender.com (free plan, so the first request after idle is slow) |
 
 The AI never writes to the database, decides safety, invents places or weather, or overrides the engine. See [docs/AI_POLICY.md](docs/AI_POLICY.md).
@@ -119,7 +119,7 @@ npm run dev                   # API on :8080, web on :5173 (proxies /api)
 
 The first run with `MONGODB_URI=memory` downloads a MongoDB binary (about 100 MB) through mongodb-memory-server. The in-memory database is empty on every server start: missions, observations and sessions are lost on restart (the browser then gets a new session automatically, and missions cached on the device show as "no longer exists on the server"). Without a `.env`, pass the variables inline, e.g. `MONGODB_URI=memory DISCOVERY_MODE=fixture npm run dev`.
 
-No variable needs a key or account: only `MONGODB_URI` is required. AI, SerpApi, Sentry, ElevenLabs, Tiger Data and Backboard are optional and off without their variable; Overpass and Open-Meteo are keyless public services.
+No variable needs a key or account: only `MONGODB_URI` is required. AI, SerpApi, Sentry, ElevenLabs, Tiger Data and Backboard are optional and off without their variable; Overpass, Open-Meteo and MET Norway are keyless public services.
 
 **Gemma 4 via Google AI Studio (optional, used in production):** `AI_PROVIDER=openai`, `OPENAI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai`, `OPENAI_MODEL=gemma-4-26b-a4b-it` and your AI Studio key in `OPENAI_API_KEY`.
 
@@ -169,7 +169,7 @@ No variable needs a key or account: only `MONGODB_URI` is required. AI, SerpApi,
 npm run lint && npm run typecheck && npm test && npm run build
 ```
 
-There are 124 server tests (unit and integration, including an end-to-end field-truth-loop test) and 38 web tests (offline queue, API client, and a production build check of the PWA manifest, icons and service worker). External services are mocked in tests; there are no automated browser tests. See [docs/TEST_PLAN.md](docs/TEST_PLAN.md).
+There are 129 server tests (unit and integration, including an end-to-end field-truth-loop test) and 43 web tests (offline queue, API client, and a production build check of the PWA manifest, icons and service worker). External services are mocked in tests; there are no automated browser tests. See [docs/TEST_PLAN.md](docs/TEST_PLAN.md).
 
 ## Deployment
 
@@ -206,7 +206,7 @@ For a demo without network discovery, set `DISCOVERY_MODE=fixture`. Places are t
 - English only. Dictation uses the browser's speech recognition. Steps are read by ElevenLabs when online and configured, otherwise by the browser voice.
 - The time-of-day panel (Tiger Data) only has observations recorded after it was configured, and its reports are as unverified as any other.
 - Backboard memory is deleted with "Delete my data", but turning the setting off only stops using it, and it isn't part of the data export.
-- Open-Meteo can return 429 from Render's shared outbound IP, and public Overpass sometimes fails; both show as failed and planning continues without them.
+- Open-Meteo can return 429 from Render's shared outbound IP; MET Norway then supplies the weather (verified live on 12 Oct 2026), and the process log says so. Public Overpass sometimes fails from Render; SerpApi still supplies places and the panel marks it covered.
 - Offline changes the server refuses (for example observations for a mission that expired or was cancelled elsewhere) can't be applied. They stay on the device, held per mission, until you download or discard them. There is no merge.
 - Device clocks are corrected per sync request from the time the device says it sent it, so a wrong clock no longer loses data. Corrected times can be late by the request latency, and changing the device clock between recording and syncing shifts those events (they are clamped between the previous event and now). Clients without `sentAt` keep the old 5-minute rule.
 - Durations: you can enter 0–240 minutes; a duration measured from timestamps that is negative or over 240 minutes (e.g. a mission left running for days) is shown as unknown and left out of your totals. Entered minutes are labelled as your estimate and the report shows the measured time next to them, but they aren't corrected or flagged when the two differ; totals use your estimate and say how many estimates they include.

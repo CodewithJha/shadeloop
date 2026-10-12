@@ -236,6 +236,35 @@ export function FieldMode({ id }: { id: string }) {
   );
 }
 
+/** Reads the report summary aloud: ElevenLabs when online and configured, otherwise the browser voice. Says which one spoke. */
+function ListenButton({ reportId, text, online }: { reportId: string; text: string; online: boolean }) {
+  const [voice, setVoice] = useState('');
+  async function listen() {
+    try {
+      if (!online) throw new Error('offline');
+      await new Audio(URL.createObjectURL(await api.reportSpeech(reportId))).play();
+      setVoice('Read by ElevenLabs.');
+    } catch {
+      if ('speechSynthesis' in globalThis) {
+        speechSynthesis.speak(new SpeechSynthesisUtterance(text));
+        setVoice('Read by your browser voice (ElevenLabs unavailable).');
+      } else setVoice('No voice available on this device.');
+    }
+  }
+  return (
+    <p className="row">
+      <button type="button" onClick={() => void listen()}>
+        Listen to report
+      </button>
+      {voice && (
+        <span className="meta" role="status">
+          {voice}
+        </span>
+      )}
+    </p>
+  );
+}
+
 /* ---------------- Completion ---------------- */
 
 export function Completion({ id }: { id: string }) {
@@ -385,6 +414,7 @@ export function Completion({ id }: { id: string }) {
       {report ? (
         <>
           <p className="report-summary">{report.summary.text}</p>
+          <ListenButton reportId={report.id} text={report.summary.text} online={online} />
           <p className="meta">
             {report.summary.generator === 'ai'
               ? `Older summary written by AI (${report.summary.model}); it may be inaccurate. The tables are the record.`

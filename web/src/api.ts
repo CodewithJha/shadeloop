@@ -73,6 +73,7 @@ export interface PlanResponse {
     generation: { generator: 'ai' | 'template'; provider: string | null; model: string | null; fallbackUsed: boolean; fallbackReason: string | null };
     weather: WeatherView | null;
     discovery: { mode: string; sources: { name: string; ok: boolean; count: number; error?: string }[]; limitations: string[] } | null;
+    memory?: { provider: string; recalled: number; saved: boolean } | null;
   };
 }
 
@@ -119,6 +120,11 @@ export const api = {
   /** ElevenLabs audio for one step; throws when unavailable so the caller can use the browser voice. */
   speech: async (missionId: string, step: number) => {
     const res = await fetch(`/api/v1/missions/${missionId}/steps/${step}/speech`, { headers: { authorization: `Bearer ${await token()}` }, signal: AbortSignal.timeout(15_000) });
+    if (!res.ok || !res.headers.get('content-type')?.startsWith('audio/')) throw new Error(`speech HTTP ${res.status}`);
+    return res.blob();
+  },
+  reportSpeech: async (reportId: string) => {
+    const res = await fetch(`/api/v1/reports/${reportId}/speech`, { headers: { authorization: `Bearer ${await token()}` }, signal: AbortSignal.timeout(15_000) });
     if (!res.ok || !res.headers.get('content-type')?.startsWith('audio/')) throw new Error(`speech HTTP ${res.status}`);
     return res.blob();
   },

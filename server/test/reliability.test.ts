@@ -286,6 +286,41 @@ describe('ElevenLabs step speech', () => {
   });
 });
 
+describe('ElevenLabs report speech', () => {
+  afterEach(() => {
+    delete env.ELEVENLABS_API_KEY;
+  });
+  it('speaks only the owner\'s stored report summary, 404 without a key or for others, 503 on outage', async () => {
+    const token = (await request(app).post(`${api}/sessions`).send({})).body.token as string;
+    const h = { authorization: `Bearer ${token}` };
+    const plan = await request(app).post(`${api}/missions/plan`).set(h).send({ availableMinutes: 15 });
+    const id = plan.body.missions[0].id as string;
+    await request(app).post(`${api}/missions/${id}/start`).set(h).send({}).expect(200);
+    const done = await request(app).post(`${api}/missions/${id}/complete`).set(h).send({ actualMinutes: 10 }).expect(200);
+    const reportId = done.body.reportId as string;
+    const summary = (await request(app).get(`${api}/reports/${reportId}`).set(h).expect(200)).body.summary.text as string;
+    const get = (t = token) => request(app).get(`${api}/reports/${reportId}/speech`).set('authorization', `Bearer ${t}`);
+    expect((await get()).body.error.code).toBe('NOT_CONFIGURED');
+
+    env.ELEVENLABS_API_KEY = 'test-key';
+    let sent: unknown;
+    routes = (url, init) => {
+      if (!url.startsWith('https://api.elevenlabs.io/v1/text-to-speech/')) throw new Error(`unexpected ${url}`);
+      sent = JSON.parse(String(init?.body));
+      return new Response(new Uint8Array([0x49, 0x44, 0x33]), { status: 200, headers: { 'content-type': 'audio/mpeg' } });
+    };
+    const ok = await get();
+    expect(ok.status).toBe(200);
+    expect(ok.headers['content-type']).toMatch(/^audio\/mpeg/);
+    expect(sent).toMatchObject({ text: summary });
+    const other = (await request(app).post(`${api}/sessions`).send({})).body.token as string;
+    expect((await get(other)).status).toBe(404);
+    clearProviderCache();
+    routes = () => new Response('no', { status: 500 });
+    expect((await get()).status).toBe(503);
+  });
+});
+
 describe('Tiger Data hourly patterns', () => {
   it('reports unavailable without TIGER_DATABASE_URL and validates the time zone', async () => {
     const token = (await request(app).post(`${api}/sessions`).send({})).body.token as string;

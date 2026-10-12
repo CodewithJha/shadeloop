@@ -257,6 +257,16 @@ export function createApp() {
     res.type('audio/mpeg').set('cache-control', 'private, max-age=86400').send(audio);
   });
 
+  // Speaks the caller's own report summary (the deterministic template text), never arbitrary text.
+  api.get('/reports/:id/speech', expensive, async (req, res) => {
+    if (!env.ELEVENLABS_API_KEY) throw new AppError(404, 'NOT_CONFIGURED', 'ElevenLabs is not configured; use the browser voice');
+    const report = await getReport(owner(res), parse(Id, req.params.id));
+    const audio = await speak(report.summary.text).catch(() => {
+      throw new AppError(503, 'DEPENDENCY_UNAVAILABLE', 'ElevenLabs is unavailable; use the browser voice');
+    });
+    res.type('audio/mpeg').set('cache-control', 'private, max-age=86400').send(audio);
+  });
+
   api.post('/missions/:id/:action', async (req, res) => {
     const action = req.params.action as MissionAction;
     if (!MISSION_ACTIONS.includes(action)) throw new AppError(404, 'NOT_FOUND', 'Unknown action');

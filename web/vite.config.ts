@@ -14,8 +14,8 @@ export default defineConfig({
         name: 'ShadeLoop',
         short_name: 'ShadeLoop',
         description: 'Go outside. Discover more. Make every walk count.',
-        theme_color: '#2f5d3a',
-        background_color: '#f6f4ee',
+        theme_color: '#203c30',
+        background_color: '#f5f0e5',
         display: 'standalone',
         start_url: '/',
         scope: '/',
@@ -28,7 +28,7 @@ export default defineConfig({
       },
       workbox: {
         // App shell only. Mission data lives in IndexedDB, and API calls always go to the network.
-        globPatterns: ['**/*.{js,css,html,svg,png}'],
+        globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
         navigateFallback: '/index.html',
         navigateFallbackDenylist: [/^\/api\//],
         cleanupOutdatedCaches: true,

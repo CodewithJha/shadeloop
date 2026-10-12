@@ -6,6 +6,25 @@ Live: https://shadeloop.onrender.com (Render free plan: the first visit after it
 
 ShadeLoop is an open-source outdoor field companion. It proposes short outdoor missions (5–120 min) that a deterministic rule engine has checked. You run them in an offline-capable Field Mode and record what you actually find. Those reports feed a shared, explainable evidence model that makes the next recommendations more honest.
 
+## Hacktoberfest 2026 · Touch Grass: sponsor tracks at a glance
+
+Built for the DEV [Hacktoberfest Open-Source AI Challenge, Week 1: Touch Grass](https://dev.to/challenges/hacktoberfest-week1-2026-10-05) (Oct 5–11, 2026). Every row is real code you can open, and each one degrades to a labelled fallback when its key is missing. Live status for every integration is on the site under **Settings → Integrations**, read from `GET /api/v1/health/dependencies` (a key alone shows "configured"; only a real successful call shows "verified").
+
+| Track | What it does in ShadeLoop | Where in the code |
+|---|---|---|
+| **Gemma** (featured) | Gemma 4 (`gemma-4-26b-a4b-it`, AI Studio) in production, `gemma3:4b` through Ollama locally: parses requests and field notes, drafts missions. A deterministic engine accepts, shortens or rejects every draft | `server/src/ai.ts`, `server/src/missions.ts`, `docs/AI_POLICY.md` |
+| **Render** (featured) | Hosts the Docker image (API + PWA) at https://shadeloop.onrender.com from `render.yaml` | `render.yaml`, `Dockerfile` |
+| **Sentry Agent Tracing** | Each plan is an `invoke_agent plan_missions` trace with `execute_tool` spans (weather, places, memory) and `chat <model>` spans carrying token usage, attempts and fallbacks | `server/src/instrument.ts`, `server/src/integrations.ts` |
+| **ElevenLabs** | Reads Field Mode steps aloud (`eleven_flash_v2_5`) so your eyes stay on the trail; browser voice offline | `speak` in `server/src/providers.ts`, `web/src/Field.tsx` |
+| **Tiger Data** | TimescaleDB hypertable of place observations + 15-minute continuous aggregate behind "Reports here by time of day" | `server/src/tiger.ts` |
+| **Backboard** | Opt-in memory of your own past requests ("no stairs"), recalled before planning, deleted with your data | `recall`/`remember` in `server/src/providers.ts` |
+| **MongoDB Atlas** | Source of truth for missions, observations, reports and the shared evidence model | `server/src/db.ts`, `server/src/missions.ts` |
+| **SerpApi** | Extra Google Maps place results next to OpenStreetMap (wired; not yet verified live) | `server/src/providers.ts` |
+
+Not used on purpose: Mastra, Temporal, TabPFN, Tinker, Arduino, DigitalOcean (no real job for them in this scope).
+
+**Timeline note (challenge rules):** the repository was started on 2026-10-11 at 12:31 IST (2026-10-10 23:01 PDT) and submitted before 11:59 PM PDT on 2026-10-11 (12:29 PM IST on 2026-10-12). Any commit dated after that deadline is listed here; at the time of writing there are none.
+
 ## The problem
 
 Map apps tell you a park exists. They can't tell you whether the bench is still there, whether the shade is real at 2 pm, or whether it's quiet. AI assistants will happily invent those facts. ShadeLoop treats every such condition as **unknown until people report it**, and shows where each claim comes from.

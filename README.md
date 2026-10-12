@@ -19,6 +19,7 @@ Built for the DEV [Hacktoberfest Open-Source AI Challenge, Week 1: Touch Grass](
 | **Tiger Data** | TimescaleDB hypertable of place observations + 15-minute continuous aggregate behind "Reports here by time of day", and **pgvector**: each place gets a 19-dimension field-report fingerprint (share of reports per attribute value), and `<=>` cosine search powers “Places with similar field reports” on a mission | `server/src/tiger.ts`, `GET /locations/:id/similar` |
 | **Backboard** | Opt-in memory of your own past requests ("no stairs"), recalled before planning, deleted with your data | `recall`/`remember` in `server/src/providers.ts` |
 | **MongoDB Atlas** | Source of truth for missions, observations, reports and the shared evidence model | `server/src/db.ts`, `server/src/missions.ts` |
+| **Process log** | Every plan returns an additive `planning.log` (step, ok, start offset, duration, detail) recorded around the same tool calls Sentry traces: memory recall, weather, places per source, Gemma drafting, each rule-engine accept or refusal, template fallback, memory save. Discover shows it as a field log | `logged` in `server/src/missions.ts`, `ProcessLog` in `web/src/App.tsx` |
 | **Visible in the app** | Every plan shows a “what ran” strip: which model read the request and drafted, that the rule engine checked it, which place sources returned how many results, weather, and Backboard recall. Only things that actually ran are listed | `FieldKit` in `web/src/App.tsx` |
 | **GitHub Copilot / Actions** | CI on every push (lint, typecheck, 124 server + 38 web tests, PWA build, audit, Docker build); Copilot issue #1 fixed in commit `89b8ead` | `.github/workflows/ci.yml` |
 | **Entire** | Agent session behind a real fix: https://entire.io/gh/CodewithJha/shadeloop/commit/89b8eada487181a88134341db161312060d1bce4 | |
@@ -155,6 +156,7 @@ No variable needs a key or account: only `MONGODB_URI` is required. AI, SerpApi,
 | `DISCOVERY_MODE` | `live` | `live` (Overpass, plus SerpApi if a key is set) or `fixture` (labelled fake places) |
 | `SERPAPI_KEY` | none | Enables SerpApi Google Maps results |
 | `OVERPASS_URL` / `OPEN_METEO_URL` / `HTTP_TIMEOUT_MS` | public endpoints / `20000` | |
+| `OVERPASS_FALLBACK_URLS` | kumi.systems and private.coffee mirrors | Comma-separated Overpass mirrors tried in order (10 s each) when the main one fails; `none` disables |
 | `SENTRY_DSN` | none | Enables Sentry agent tracing and error reports |
 | `ELEVENLABS_API_KEY` / `ELEVENLABS_VOICE_ID` | none / a stock voice | Enables the ElevenLabs step voice |
 | `TIGER_DATABASE_URL` | none | Tiger Data `postgres://` URL; enables the time-of-day mirror |

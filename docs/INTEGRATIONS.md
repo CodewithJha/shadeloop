@@ -78,6 +78,7 @@ Any other OpenAI-compatible chat-completions API works through the same `openai`
 - **Evidence:** VERIFIED live on 2026-10-11.
 
 ## OpenStreetMap Overpass
+- **Failover (2026-10-12):** when the main instance fails, `OVERPASS_FALLBACK_URLS` mirrors are tried in order with up to 10 s each; the first error is reported if all fail. At the time of writing, a check from outside Render found the main instance timing out (504) and both default mirrors returning 500, so failover can't help while they're all down. SerpApi covers place search then, and Settings shows OpenStreetMap as amber "covered by SerpApi".
 - **Role:** discover parks, gardens, nature reserves and benches near a coarse point.
 - **Env:** `OVERPASS_URL`, `HTTP_TIMEOUT_MS` (no key).
 - **Failure:** discovery returns 503 if all sources fail; planning continues without named places and says so. Results are cached (see above); a 504 is retried once.
@@ -92,6 +93,7 @@ Any other OpenAI-compatible chat-completions API works through the same `openai`
 - **Status:** VERIFIED live on Render on 2026-10-12 (returned 20 places for a Bengaluru plan while Overpass failed).
 
 ## Open-Meteo
+- **Rate limits:** on Render's shared outbound IP, Open-Meteo sometimes answers 429. Weather is already cached per ~1 km cell for 10 minutes and the provider is left alone for its `Retry-After`. Missions then say weather is unavailable and ask you to check conditions, and Settings shows this as amber rather than red.
 - **Role:** current temperature, apparent temperature, precipitation, wind and weather code, plus heat/cold/rain safety notes.
 - **Env:** `OPEN_METEO_URL` (no key).
 - **Failure:** `weather.available: false` with a reason; the mission tells the user to check conditions themselves.

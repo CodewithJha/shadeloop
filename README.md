@@ -22,7 +22,30 @@ Built for the DEV [Hacktoberfest Open-Source AI Challenge, Week 1: Touch Grass](
 | **Visible in the app** | Every plan shows a “what ran” strip: which model read the request and drafted, that the rule engine checked it, which place sources returned how many results, weather, and Backboard recall. Only things that actually ran are listed | `FieldKit` in `web/src/App.tsx` |
 | **GitHub Copilot / Actions** | CI on every push (lint, typecheck, 124 server + 38 web tests, PWA build, audit, Docker build); Copilot issue #1 fixed in commit `89b8ead` | `.github/workflows/ci.yml` |
 | **Entire** | Agent session behind a real fix: https://entire.io/gh/CodewithJha/shadeloop/commit/89b8eada487181a88134341db161312060d1bce4 | |
-| **SerpApi** | Extra Google Maps place results next to OpenStreetMap (wired; not yet verified live) | `server/src/providers.ts` |
+| **SerpApi** | Google Maps place results next to OpenStreetMap; verified live 2026-10-12 (20 places) | `server/src/providers.ts` |
+
+### How Gemma fits in
+
+```mermaid
+flowchart LR
+  R["Your request<br/>'a quiet 20 min break, shady, with a bench'"] --> G1["Gemma: parse_request<br/>→ constraints"]
+  G1 --> G2["Gemma: propose_missions<br/>drafts around real places + weather"]
+  G2 --> E{"Rule engine<br/>time · walking limit · safety text ·<br/>real places only · evidence"}
+  E -- accepted --> M["Missions you see<br/>+ field note: model, drafts kept/refused"]
+  E -- all refused --> T["Templates<br/>labelled 'AI not used' + reason"]
+  T --> M
+  F["Field notes you type"] --> G3["Gemma: parse_note<br/>→ proposed observations you confirm"]
+```
+
+Gemma proposes; plain code decides. Every plan in the app shows a field note naming the Gemma model, how many drafts the rule engine accepted, and the exact reason for each one it refused.
+
+**Live run on https://shadeloop.onrender.com (2026-10-12, about 10:30 IST, one test session, deleted afterwards):**
+- **Gemma:** `gemma-4-26b-a4b-it` parsed the request (`method: ai`) and drafted the mission, which the engine accepted (about 26 s, 2 model calls). On a second request the engine refused Gemma's draft ("walking 23 min exceeds your limit of 20 min") and fell back to templates, which is shown in the UI.
+- **SerpApi** returned 20 places. **Backboard** saved the first request and recalled 1 memory on the second plan.
+- **ElevenLabs** returned step audio (20 KB in 1.5 s) and report audio (63 KB).
+- **Tiger Data:** the time-of-day aggregate returned rows, and **pgvector** "similar places" matched the two test places to each other (both had identical test reports, so similarity 1.0).
+- **MongoDB** synced and deleted everything with `DELETE /me` (4 missions, 6 observations, 2 reports, 6 Tiger rows, the Backboard memory).
+- **Failed that run:** OpenStreetMap Overpass returned `fetch failed` and Open-Meteo returned `429` from Render's shared IP. Both are shown honestly as failed in the app, and planning continued.
 
 Not used on purpose: Mastra, Temporal, TabPFN, Tinker, Arduino, DigitalOcean (no real job for them in this scope).
 
@@ -180,7 +203,7 @@ For a demo without network discovery, set `DISCOVERY_MODE=fixture`. Places are t
 - English only. Dictation uses the browser's speech recognition. Steps are read by ElevenLabs when online and configured, otherwise by the browser voice.
 - The time-of-day panel (Tiger Data) only has observations recorded after it was configured, and its reports are as unverified as any other.
 - Backboard memory is deleted with "Delete my data", but turning the setting off only stops using it, and it isn't part of the data export.
-- SerpApi is wired but has not been verified against the live API.
+- Open-Meteo can return 429 from Render's shared outbound IP, and public Overpass sometimes fails; both show as failed and planning continues without them.
 - Offline changes the server refuses (for example observations for a mission that expired or was cancelled elsewhere) can't be applied. They stay on the device, held per mission, until you download or discard them. There is no merge.
 - Device clocks are corrected per sync request from the time the device says it sent it, so a wrong clock no longer loses data. Corrected times can be late by the request latency, and changing the device clock between recording and syncing shifts those events (they are clamped between the previous event and now). Clients without `sentAt` keep the old 5-minute rule.
 - Durations: you can enter 0–240 minutes; a duration measured from timestamps that is negative or over 240 minutes (e.g. a mission left running for days) is shown as unknown and left out of your totals. Entered minutes are labelled as your estimate and the report shows the measured time next to them, but they aren't corrected or flagged when the two differ; totals use your estimate and say how many estimates they include.

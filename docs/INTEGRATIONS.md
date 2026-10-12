@@ -64,7 +64,7 @@ Any other OpenAI-compatible chat-completions API works through the same `openai`
 - **Env:** `TIGER_DATABASE_URL` (`postgres://…`; TLS is forced with `sslmode=require`).
 - **Failure:** a failed mirror write is logged and recorded as `DEGRADED`; the observation is still saved. The hourly endpoint returns `available: false` with a reason and the panel stays hidden. Observations made before Tiger was configured are not backfilled.
 - **Privacy and deletion:** no coordinates, notes or tokens. Owners are stored as a SHA-256 hash of the owner id. `DELETE /me` deletes that owner's rows (`tigerRowsDeleted` in the response; `null` if Tiger is off or failed), and the aggregate, which holds counts only, drops them at its next refresh.
-- **pgvector similarity (added 2026-10-12):** `shadeloop.place_fingerprints (location_id, name, reports, embedding vector(19))`. The fingerprint is deterministic, with no embedding model: per attribute, the share of the last 90 days' reports for each value. It is refreshed on every mirrored observation and after `DELETE /me`. `GET /api/v1/locations/:id/similar` returns the 3 nearest places with at least 2 reports by cosine distance (`<=>`), shown as "Places with similar field reports". Without the `vector` extension it returns `available: false` and the time-series features keep working. Covered by unit tests of the fingerprint and the not-configured path; **not yet verified against the live Tiger database.**
+- **pgvector similarity (added 2026-10-12):** `shadeloop.place_fingerprints (location_id, name, reports, embedding vector(19))`. The fingerprint is deterministic, with no embedding model: per attribute, the share of the last 90 days' reports for each value. It is refreshed on every mirrored observation and after `DELETE /me`. `GET /api/v1/locations/:id/similar` returns the 3 nearest places with at least 2 reports by cosine distance (`<=>`), shown as "Places with similar field reports". Without the `vector` extension it returns `available: false` and the time-series features keep working. Covered by unit tests of the fingerprint and the not-configured path; **verified live on Render on 2026-10-12** (two test places with 3 reports each matched each other; data deleted afterwards).
 - **Evidence:** VERIFIED live on 2026-10-11 (hypertable and aggregate).
 
 ## Backboard (opt-in request memory)
@@ -89,7 +89,7 @@ Any other OpenAI-compatible chat-completions API works through the same `openai`
 - **Code:** `server/src/providers.ts` (discovery runs it next to Overpass when a key is set).
 - **Env:** `SERPAPI_KEY`.
 - **Failure:** like Overpass: its source is marked failed and the other results are still used.
-- **Status:** wired; tests only cover its `NOT_CONFIGURED` status. **Not verified live.**
+- **Status:** VERIFIED live on Render on 2026-10-12 (returned 20 places for a Bengaluru plan while Overpass failed).
 
 ## Open-Meteo
 - **Role:** current temperature, apparent temperature, precipitation, wind and weather code, plus heat/cold/rain safety notes.

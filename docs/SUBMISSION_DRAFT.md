@@ -42,6 +42,16 @@ The core idea: map apps know a park exists; they don't know whether the bench is
 - **Offline-first PWA.** React 19 + Vite. Missions and an operation queue live in IndexedDB, so a mission opened once works with no signal and syncs idempotently later.
 - **Stack:** Node + Express 5 + Zod, MongoDB Atlas, TypeScript everywhere. 121 server tests and 38 web tests; every external service is mocked in CI.
 
+
+### Live run (Oct 12, on the deployed app, one throwaway session)
+
+- `gemma-4-26b-a4b-it` parsed "a quiet 20 minute break somewhere shady with a bench" and drafted "Parkside Pause" at a real Cubbon Park spot. The rule engine accepted it (about 26 s, 2 model calls).
+- On the next request the engine **refused** Gemma's draft ("walking 23 min exceeds your limit of 20 min") and used a template instead. The app says so in a field note. That's the point: the open model proposes, plain code decides.
+- SerpApi returned 20 places (Overpass was down at that moment), and Backboard recalled the first request when planning the second.
+- ElevenLabs read a step (1.5 s) and the finished report aloud. Tiger Data returned the time-of-day aggregate, and pgvector matched two places with the same reports.
+- `DELETE /me` then removed everything: missions, observations, reports, Tiger rows and the Backboard memory.
+- Open-Meteo was rate-limited (429) on Render's shared IP during the run, and the app said "weather unavailable" instead of guessing.
+
 [TODO, optional but valuable: one real Sentry trace screenshot showing invoke_agent plan_missions → execute_tool + chat spans with tokens and latency, plus one thing it helped you find.]
 
 ## Why Does Open Innovation Matter?
@@ -63,11 +73,11 @@ The core idea: map apps know a park exists; they don't know whether the bench is
 - **Best Use of Render**: the whole app (API + PWA) runs as a Docker web service from `render.yaml` at shadeloop.onrender.com.
 - **Best Use of Sentry Agent Tracing**: each plan is traced as an agent run: `invoke_agent plan_missions`, `execute_tool` spans for weather, places and memory, `chat <model>` spans with token usage, plus attempts and fallback flags. Voice (`speak_step`, `speak_report`) and similarity search (`similar_places`) are traced as tools too. No prompts or coordinates go into spans. [TODO: attach a trace screenshot; this track asks for one.]
 - **Best Use of ElevenLabs**: gives Field Mode a voice: it reads each step aloud so your eyes stay on the trail, and reads your completion report back when you finish ("Listen to report"). The browser voice is the offline fallback, and the app says which voice spoke.
-- **Best Use of Tiger Data**: a TimescaleDB hypertable and a 15-minute continuous aggregate power "Reports here by time of day" for each place. **pgvector** stores a field-report fingerprint per place (the share of reports for each attribute value: shade, noise, crowding, bench…), and cosine search (`<=>`) powers "Places with similar field reports": if you liked this quiet, shady spot, here's where people reported the same. No embedding model is needed, so it's free, deterministic and explainable. [TODO: verify live after redeploy, or soften this line.]
+- **Best Use of Tiger Data**: a TimescaleDB hypertable and a 15-minute continuous aggregate power "Reports here by time of day" for each place. **pgvector** stores a field-report fingerprint per place (the share of reports for each attribute value: shade, noise, crowding, bench…), and cosine search (`<=>`) powers "Places with similar field reports": if you liked this quiet, shady spot, here's where people reported the same. No embedding model is needed, so it's free, deterministic and explainable. Verified live on 2026-10-12.
 - **Best Use of Backboard**: opt-in memory of your own earlier requests ("I need step-free paths") that future plans respect; deleted with "Delete my data".
 - **Best Use of MongoDB Atlas**: the data layer behind an app built on an open-weight model: missions, observations, reports and the shared evidence model.
 - **Best Use of GitHub Copilot**: CI on GitHub Actions runs lint, typecheck, 124 server and 38 web tests, the PWA build, an audit and a Docker build on every push. Copilot issue #1 (a flaky concurrency test) was fixed in commit `89b8ead`.
 - **Best Use of Entire**: the agent session behind that fix is public: https://entire.io/gh/CodewithJha/shadeloop/commit/89b8eada487181a88134341db161312060d1bce4
-- **Best Use of SerpApi**: [only keep this if you verify it live] extra Google Maps place results next to OpenStreetMap during discovery.
+- **Best Use of SerpApi**: grounds every plan in fresh Google Maps place results next to OpenStreetMap. In a live run on 2026-10-12, Overpass failed and SerpApi's 20 places kept the plan grounded in real places.
 
 <!-- Solo submission. -->

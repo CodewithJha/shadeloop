@@ -5,6 +5,7 @@ import { cacheMission, dismissOp, enqueue, flush, getCached, getMeta, listCached
 import { Completion, FieldMode } from './Field.tsx';
 import { Settings } from './Settings.tsx';
 import { canOfferUpdate } from './update.ts';
+import { modelSummary } from './modelNote.ts';
 import { Contours, FieldLabel, Glyph, Sprig, Stamp, StateNote, Trail } from './Marks.tsx';
 
 export const label = (s: string) => s.replace(/_/g, ' ');
@@ -274,6 +275,30 @@ function FieldKit({ p }: { p: PlanResponse['planning'] }) {
   );
 }
 
+/** Field note on the open model's part in this plan, from the response only: who drafted, what the engine refused. */
+function ModelNote({ p, accepted }: { p: PlanResponse['planning']; accepted: number }) {
+  const g = p.generation;
+  if (!g.model) return null;
+  const rejected = g.rejectedCandidates ?? [];
+  const gemma = /gemma/i.test(g.model);
+  return (
+    <aside className="model-note" aria-label="How this plan was made">
+      <p className="model-note-title">
+        <span>Field note</span> {gemma ? 'Gemma' : 'Model'} · <code>{g.model}</code>
+        {g.provider === 'ollama' && ' (local, Ollama)'}
+      </p>
+      <p>{modelSummary(g, accepted)}</p>
+      {rejected.length > 0 && (
+        <ul className="model-note-rejects">
+          {rejected.map((r) => (
+            <li key={r}>Refused: {r}</li>
+          ))}
+        </ul>
+      )}
+    </aside>
+  );
+}
+
 /* ---------------- Discover ---------------- */
 
 function Discover() {
@@ -396,6 +421,7 @@ function Discover() {
           <FieldLabel n={1} id="results">
             Suggestions
           </FieldLabel>
+          <ModelNote p={result.planning} accepted={result.missions.length} />
           <FieldKit p={result.planning} />
           <div className="source-strip">
             <p className="meta">

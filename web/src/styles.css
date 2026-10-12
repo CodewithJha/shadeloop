@@ -399,3 +399,12 @@ td .tag { white-space: normal; }
 .integ-status.tooling { border: 1.5px solid var(--ink-2); padding: 0.05rem 0.4rem; transform: rotate(-2deg); background: var(--paper); }
 .integ-links { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s4); margin: auto 0 0; padding-top: var(--s2); border-top: 1px dashed var(--rule); max-width: none; }
 .integ-links a { font-family: var(--mono); font-size: 0.8rem; font-weight: 600; min-height: 44px; display: inline-flex; align-items: center; }
+
+/* Field note on the open model's part in a plan. */
+.model-note { position: relative; margin: 0 0 var(--s4); padding: var(--s3) var(--s4); background: var(--lime); border: var(--bw) solid var(--ink); box-shadow: var(--shadow-sm); transform: rotate(-0.4deg); max-width: 44rem; }
+.model-note p { margin: 0.2rem 0; max-width: none; }
+.model-note-title { font-family: var(--mono); font-size: 0.78rem; font-weight: 600; letter-spacing: 0.04em; }
+.model-note-title span { background: var(--ink); color: var(--lime); padding: 0.05rem 0.4rem; margin-right: 0.3rem; text-transform: uppercase; }
+.model-note code { font-family: var(--mono); }
+.model-note-rejects { margin: 0.3rem 0 0; padding-left: 1.1rem; font-size: 0.88rem; }
+@media (prefers-reduced-motion: reduce) { .model-note { transform: none; } }

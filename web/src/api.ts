@@ -70,7 +70,7 @@ export interface PlanResponse {
   planning: {
     constraints: { missionType: string; availableMinutes: number; required: string[]; preferred: string[] };
     parse: { method: 'ai' | 'keywords'; provider: string | null; model: string | null; fallbackReason: string | null } | null;
-    generation: { generator: 'ai' | 'template'; provider: string | null; model: string | null; fallbackUsed: boolean; fallbackReason: string | null };
+    generation: { generator: 'ai' | 'template'; provider: string | null; model: string | null; fallbackUsed: boolean; fallbackReason: string | null; attempts?: number; rejectedCandidates?: string[] };
     weather: WeatherView | null;
     discovery: { mode: string; sources: { name: string; ok: boolean; count: number; error?: string }[]; limitations: string[] } | null;
     memory?: { provider: string; recalled: number; saved: boolean } | null;

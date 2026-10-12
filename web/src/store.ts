@@ -85,12 +85,18 @@ export async function refreshMission(id: string, get: (id: string) => Promise<Mi
   try {
     await cacheMission(await get(id));
   } catch (e) {
-    const d = await db();
-    const c = e instanceof ApiError && e.status === 404 ? await d.get('missions', id) : undefined;
-    if (c) {
-      await d.put('missions', { ...c, gone: true });
-      notify();
-    }
+    // Mark a cached copy as gone, but never let local storage trouble hide the real error.
+    if (e instanceof ApiError && e.status === 404)
+      try {
+        const d = await db();
+        const c = await d.get('missions', id);
+        if (c) {
+          await d.put('missions', { ...c, gone: true });
+          notify();
+        }
+      } catch {
+        /* the error below still reaches the screen */
+      }
     throw e;
   }
 }

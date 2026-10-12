@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type FormEvent } from 'react';
 import { CONDITIONS, MISSION_TYPES, type Condition, type Coords, type Mission, type SourceType } from '@shadeloop/shared';
 import { api, type HistoryItem, type HourlyReport, type PlanResponse, type SimilarPlace } from './api.ts';
-import { cacheMission, dismissOp, enqueue, flush, getCached, getMeta, listCached, listOps, refreshMission, resetStuck, retryFailed, retryOp, subscribe, updateLocal, type CachedMission, type QueuedOp } from './store.ts';
+import { cacheMission, dismissOp, enqueue, flush, getCached, getMeta, listCached, listOps, refreshMission, resetStuck, retryFailed, retryOp, subscribe, updateLocal, type CachedMission, type QueuedOp, ApiError } from './store.ts';
 import { Completion, FieldMode } from './Field.tsx';
 import { Settings } from './Settings.tsx';
 import { canOfferUpdate } from './update.ts';
@@ -592,17 +592,17 @@ function MissionDetail({ id }: { id: string }) {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    const load = () => void getCached(id).then(setC);
+    const load = () => void getCached(id).then(setC).catch(() => setError('this device could not read its saved missions'));
     load();
     const unsub = subscribe(load);
-    if (navigator.onLine) refreshMission(id, api.mission).catch((e: Error) => setError(e.message));
+    if (navigator.onLine) refreshMission(id, api.mission).catch((e: Error) => setError(e instanceof ApiError && e.status === 404 ? 'NOT_FOUND' : e.message));
     return unsub;
   }, [id]);
 
   if (!c)
     return error ? (
       <p className="notice error" role="alert">
-        Could not load this mission: {error}
+        {error === 'NOT_FOUND' ? 'Mission not found. It may have been deleted, or the link is wrong.' : `Could not load this mission: ${error}`}
       </p>
     ) : online ? (
       <StateNote kind="loading">Opening the mission…</StateNote>

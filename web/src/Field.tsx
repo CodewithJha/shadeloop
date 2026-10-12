@@ -8,9 +8,15 @@ import { FieldLabel, Stamp, StateNote } from './Marks.tsx';
 function useCached(id: string) {
   const [c, setC] = useState<CachedMission | null | undefined>();
   useEffect(() => {
-    const load = () => void getCached(id).then((x) => setC(x ?? null));
+    const load = () => void getCached(id).then((x) => setC(x ?? null), () => setC(null));
+    // Never spin forever: if local storage does not answer, show the honest not-saved state.
+    const t = setTimeout(() => setC((v) => (v === undefined ? null : v)), 4000);
     load();
-    return subscribe(load);
+    const unsub = subscribe(load);
+    return () => {
+      clearTimeout(t);
+      unsub();
+    };
   }, [id]);
   return c;
 }

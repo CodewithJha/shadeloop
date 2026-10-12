@@ -373,3 +373,20 @@ describe('Backboard request memory', () => {
     expect(seen.at(-1)).toBe('DELETE /assistants/a1');
   });
 });
+
+describe('Overpass mirror failover', () => {
+  afterEach(() => {
+    (env as { OVERPASS_FALLBACK_URLS: string[] }).OVERPASS_FALLBACK_URLS = [];
+  });
+  it('uses the next mirror when the main instance fails, and reports the first error only if all fail', async () => {
+    clearProviderCache();
+    (env as { OVERPASS_FALLBACK_URLS: string[] }).OVERPASS_FALLBACK_URLS = ['https://mirror-a.test/api/interpreter', 'https://mirror-b.test/api/interpreter'];
+    routes = (url) => (url.startsWith('https://mirror-b.test') ? json(overpass) : url.includes('overpass-api.de') || url.startsWith('https://mirror-a.test') ? new Response('x', { status: 504 }) : down(url));
+    const r = await discover({ lat: 12.5, lon: 77.5 });
+    expect(r.sources[0]).toMatchObject({ name: 'openstreetmap', ok: true, count: 1 });
+    clearProviderCache();
+    routes = () => new Response('x', { status: 504 });
+    const bad = await discover({ lat: 12.6, lon: 77.6 });
+    expect(bad.sources[0]).toMatchObject({ ok: false, error: 'Overpass HTTP 504' });
+  });
+});

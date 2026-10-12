@@ -36,10 +36,10 @@ export const clearProviderCache = () => {
  * Fetch that must return 2xx. A network error or 5xx is retried once; both attempts share one `HTTP_TIMEOUT_MS`
  * budget and a timeout is not retried. A 429 is not retried either: the provider is left alone until it says so.
  */
-async function fetchOk(provider: string, url: string | URL, init: RequestInit = {}): Promise<Response> {
+async function fetchOk(provider: string, url: string | URL, init: RequestInit = {}, timeoutMs = env.HTTP_TIMEOUT_MS): Promise<Response> {
   const wait = (cooldownUntil.get(provider) ?? 0) - Date.now();
   if (wait > 0) throw new Error(`${provider} rate limited us; not called for ${Math.ceil(wait / 1000)} s`);
-  const signal = AbortSignal.timeout(env.HTTP_TIMEOUT_MS);
+  const signal = AbortSignal.timeout(timeoutMs);
   for (let attempt = 1; ; attempt++) {
     let res: Response | undefined;
     let err: unknown;
@@ -67,11 +67,20 @@ const errorText = (e: unknown) => ((e as Error).name === 'TimeoutError' ? 'timeo
 async function overpass(origin: Coords, radiusM: number): Promise<LocationView[]> {
   const around = `(around:${radiusM},${origin.lat},${origin.lon})`;
   const q = `[out:json][timeout:15];nwr["leisure"~"^(park|garden|nature_reserve)$"]${around};out center 30;node["amenity"="bench"]${around};out 15;`;
-  const res = await fetchOk('Overpass', env.OVERPASS_URL, {
-    method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded', 'user-agent': UA },
-    body: new URLSearchParams({ data: q }),
-  });
+  const init = () => ({ method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', 'user-agent': UA }, body: new URLSearchParams({ data: q }) });
+  // The public instance often fails from shared cloud IPs; volunteer mirrors are tried in order with a shorter budget each.
+  let res: Response | undefined;
+  let firstError: unknown;
+  for (const [i, url] of [env.OVERPASS_URL, ...env.OVERPASS_FALLBACK_URLS].entries()) {
+    try {
+      res = await fetchOk(i ? `Overpass mirror ${new URL(url).host}` : 'Overpass', url, init(), i ? Math.min(env.HTTP_TIMEOUT_MS, 10_000) : env.HTTP_TIMEOUT_MS);
+      if (i) log.info({ mirror: new URL(url).host }, 'overpass served by mirror');
+      break;
+    } catch (e) {
+      firstError ??= e;
+    }
+  }
+  if (!res) throw firstError;
   const body = (await res.json()) as {
     elements?: { type: string; id: number; lat?: number; lon?: number; center?: { lat: number; lon: number }; tags?: Record<string, string> }[];
   };

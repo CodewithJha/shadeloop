@@ -21,6 +21,12 @@ const Env = z
     DISCOVERY_MODE: z.enum(['live', 'fixture']).default('live'),
     SERPAPI_KEY: z.string().min(1).optional(),
     OVERPASS_URL: z.url().default('https://overpass-api.de/api/interpreter'),
+    /** Comma-separated Overpass mirrors tried in order when the main one fails (`none` disables failover). */
+    OVERPASS_FALLBACK_URLS: z
+      .string()
+      .default('https://overpass.kumi.systems/api/interpreter,https://overpass.private.coffee/api/interpreter')
+      .transform((v) => (v === 'none' ? '' : v).split(',').map((u) => u.trim()).filter(Boolean))
+      .pipe(z.array(z.url())),
     OPEN_METEO_URL: z.url().default('https://api.open-meteo.com/v1/forecast'),
     HTTP_TIMEOUT_MS: z.coerce.number().int().min(500).max(60_000).default(20_000),
     SENTRY_DSN: z.url().optional(),

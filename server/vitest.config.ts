@@ -12,6 +12,7 @@ export default defineConfig({
       AI_MAX_RETRIES: '1',
       AI_TIMEOUT_MS: '2000',
       DISCOVERY_MODE: 'live',
+      OVERPASS_FALLBACK_URLS: 'none',
       RATE_LIMIT_PER_MIN: '10000',
     },
     testTimeout: 30_000,

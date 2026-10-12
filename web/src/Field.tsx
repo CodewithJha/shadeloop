@@ -3,6 +3,7 @@ import { ATTRIBUTES, MAX_ACTUAL_MINUTES, type Attribute, type Preferences, type 
 import { api } from './api.ts';
 import { enqueue, getCached, getMeta, subscribe, updateLocal, type CachedMission } from './store.ts';
 import { GoneNotice, go, label, useSync } from './App.tsx';
+import { FieldLabel, Stamp, StateNote } from './Marks.tsx';
 
 function useCached(id: string) {
   const [c, setC] = useState<CachedMission | null | undefined>();
@@ -32,8 +33,8 @@ export function FieldMode({ id }: { id: string }) {
 
   useEffect(() => void getMeta<Preferences>('prefs').then(setPrefs), []);
 
-  if (c === undefined) return <p>Loading…</p>;
-  if (c === null) return <p className="notice">This mission is not saved on this device. Open it once while online to use it in the field.</p>;
+  if (c === undefined) return <StateNote kind="loading">Opening Field Mode…</StateNote>;
+  if (c === null) return <StateNote kind="offline">This mission is not saved on this device. Open it once while online to use it in the field.</StateNote>;
   const { mission: m, local } = c;
   const step = Math.min(local.currentStep, m.steps.length - 1);
   const pending = ops.filter((o) => o.missionId === id && o.state !== 'synced').length;
@@ -109,17 +110,39 @@ export function FieldMode({ id }: { id: string }) {
 
   return (
     <>
-      <h1 style={{ marginBottom: 0 }}>{m.title}</h1>
-      <p className="meta num">
-        Step {step + 1} of {m.steps.length} · {label(local.status)} · {pending ? `${pending} change${pending > 1 ? 's' : ''} waiting to sync` : 'synced'}
-        {!online && ' · offline, saved on this device'}
-      </p>
+      <header className="field-head">
+        <p className="eyebrow">
+          <span>Field Mode</span>
+          <Stamp tone={local.status}>{label(local.status)}</Stamp>
+        </p>
+        <h1 className="field-title">{m.title}</h1>
+        <p className="meta num">
+          {pending ? `${pending} change${pending > 1 ? 's' : ''} waiting to sync` : 'synced'}
+          {!online && ' · offline, saved on this device'}
+        </p>
+      </header>
       {local.status === 'paused' && <p className="notice">Paused. Resume when you are ready.</p>}
 
-      <p className="field-step" key={step} data-anim aria-live="polite">
-        {m.steps[step].text}
-      </p>
-      <p className="meta num">About {m.steps[step].minutes} min</p>
+      <section className="step-card" aria-label={`Step ${step + 1} of ${m.steps.length}`}>
+        <div className="step-meta num">
+          <span className="step-big" aria-hidden="true">
+            {String(step + 1).padStart(2, '0')}
+          </span>
+          <span>
+            Step {step + 1} of {m.steps.length}
+            <br />
+            about {m.steps[step].minutes} min
+          </span>
+        </div>
+        <ol className="step-trail" aria-hidden="true">
+          {m.steps.map((_, i) => (
+            <li key={i} className={i < step ? 'done' : i === step ? 'here' : ''} />
+          ))}
+        </ol>
+        <p className="field-step" key={step} data-anim aria-live="polite">
+          {m.steps[step].text}
+        </p>
+      </section>
       <div className="row field-controls">
         <button type="button" disabled={step === 0} onClick={() => setStep(step - 1)}>
           Previous
@@ -134,7 +157,7 @@ export function FieldMode({ id }: { id: string }) {
         )}
       </div>
 
-      <h2>Quick observations</h2>
+      <FieldLabel n={1}>Quick observations</FieldLabel>
       <p className="meta" role="status" aria-live="polite">
         {announce || 'Tap what you notice. Each tap is saved on this device and synced when possible.'}
       </p>
@@ -151,7 +174,7 @@ export function FieldMode({ id }: { id: string }) {
         </div>
       ))}
 
-      <details>
+      <details className="sheet note-sheet">
         <summary>Add a note (optional)</summary>
         <form onSubmit={suggest}>
           <label htmlFor="note">Describe what you notice</label>
@@ -186,7 +209,7 @@ export function FieldMode({ id }: { id: string }) {
         ))}
       </details>
 
-      <h2>Mission</h2>
+      <FieldLabel n={2}>Mission</FieldLabel>
       <div className="row field-controls">
         {local.status === 'active' ? (
           <button type="button" onClick={() => void transition('pause')}>
@@ -204,7 +227,7 @@ export function FieldMode({ id }: { id: string }) {
           Cancel
         </button>
       </div>
-      <ul className="hint">
+      <ul className="hint safety">
         {m.safetyNotes.map((s) => (
           <li key={s}>{s}</li>
         ))}
@@ -234,8 +257,8 @@ export function Completion({ id }: { id: string }) {
       .catch((e: Error) => setReportError(e.message));
   }, [reportId, online]);
 
-  if (c === undefined) return <p>Loading…</p>;
-  if (c === null) return <p className="notice">This mission is not saved on this device.</p>;
+  if (c === undefined) return <StateNote kind="loading">Opening the report…</StateNote>;
+  if (c === null) return <StateNote kind="offline">This mission is not saved on this device.</StateNote>;
   const { mission: m, local } = c;
   const opState = new Map(ops.map((o) => [o.opId, o.state]));
 
@@ -260,8 +283,13 @@ export function Completion({ id }: { id: string }) {
   if (local.status === 'active' || local.status === 'paused') {
     return (
       <>
-        <h1>Finish “{m.title}”</h1>
-        <form onSubmit={finish}>
+        <header className="page-head">
+          <p className="eyebrow">
+            <span>Closing entry</span>
+          </p>
+          <h1 className="display small">Finish “{m.title}”</h1>
+        </header>
+        <form className="sheet" onSubmit={finish}>
           <fieldset>
             <legend>How did it go?</legend>
             <label className="check">
@@ -284,7 +312,7 @@ export function Completion({ id }: { id: string }) {
           </select>
           <label htmlFor="fb">Feedback (optional, private to you)</label>
           <textarea id="fb" value={feedback} maxLength={1000} onChange={(e) => setFeedback(e.target.value)} />
-          <div className="row" style={{ marginTop: '1rem' }}>
+          <div className="row actions">
             <button className="primary" type="submit">
               Finish mission
             </button>
@@ -300,8 +328,14 @@ export function Completion({ id }: { id: string }) {
   const deviceMinutes = local.startedAt && local.completedAt ? Math.round((Date.parse(local.completedAt) - Date.parse(local.startedAt)) / 60_000) : null;
   return (
     <>
-      <h1>{m.title}: {local.status}</h1>
-      <h2>Planned vs actual</h2>
+      <header className="page-head report-head">
+        <p className="eyebrow">
+          <span>Field report</span>
+          <Stamp tone={local.status}>{local.status}</Stamp>
+        </p>
+        <h1 className="display small">{m.title}</h1>
+      </header>
+      <FieldLabel n={1}>Planned vs actual</FieldLabel>
       <table className="num">
         <thead>
           <tr>
@@ -334,11 +368,11 @@ export function Completion({ id }: { id: string }) {
         </tbody>
       </table>
 
-      <h2>Your observations</h2>
+      <FieldLabel n={2}>Your observations</FieldLabel>
       {local.observations.length === 0 ? (
-        <p>None recorded on this device.</p>
+        <StateNote kind="empty">None recorded on this device.</StateNote>
       ) : (
-        <ul>
+        <ul className="obs-list">
           {local.observations.map((o) => (
             <li key={o.opId}>
               {label(o.attribute)}: <strong>{label(o.value)}</strong> <span className="meta">· {opState.get(o.opId) ?? 'synced'}</span>
@@ -347,10 +381,10 @@ export function Completion({ id }: { id: string }) {
         </ul>
       )}
 
-      <h2>Report</h2>
+      <FieldLabel n={3}>Report</FieldLabel>
       {report ? (
         <>
-          <p>{report.summary.text}</p>
+          <p className="report-summary">{report.summary.text}</p>
           <p className="meta">
             {report.summary.generator === 'ai'
               ? `Older summary written by AI (${report.summary.model}); it may be inaccurate. The tables are the record.`
@@ -396,12 +430,14 @@ export function Completion({ id }: { id: string }) {
           Could not load the report: {reportError}
         </p>
       ) : local.status === 'completed' ? (
-        <p className="notice">{online ? 'Generating the report once your changes sync…' : 'You are offline. The report will be generated when your changes sync.'}</p>
+        <StateNote kind={online ? 'loading' : 'offline'}>{online ? 'Generating the report once your changes sync…' : 'You are offline. The report will be generated when your changes sync.'}</StateNote>
       ) : (
         <p>Cancelled missions have no report.</p>
       )}
-      <p>
-        <a href="#/">Plan another mission</a>
+      <p className="actions">
+        <a className="btn primary" href="#/">
+          Plan another mission <span aria-hidden="true">→</span>
+        </a>
       </p>
     </>
   );

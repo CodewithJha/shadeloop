@@ -3,6 +3,7 @@ import { MISSION_TYPES, Preferences, type Coords } from '@shadeloop/shared';
 import { api, type Dependency } from './api.ts';
 import { clearAll, delMeta, getMeta, setMeta } from './store.ts';
 import { label, useSync } from './App.tsx';
+import { FieldLabel, StateNote } from './Marks.tsx';
 
 const STATUS_TONE: Record<string, string> = { VERIFIED: 'good', DEGRADED: 'bad', NOT_CONFIGURED: 'warn' };
 
@@ -35,7 +36,14 @@ export function Settings() {
       .catch((e: Error) => setError(e.message));
   }, [online]);
 
-  if (!prefs) return error ? <p role="alert">Could not load settings: {error}</p> : <p>Loading…</p>;
+  if (!prefs)
+    return error ? (
+      <p className="notice error" role="alert">
+        Could not load settings: {error}
+      </p>
+    ) : (
+      <StateNote kind="loading">Loading settings…</StateNote>
+    );
   const set = (patch: Partial<Preferences>) => setPrefs({ ...prefs, ...patch });
 
   async function save(e: FormEvent) {
@@ -102,9 +110,15 @@ export function Settings() {
 
   return (
     <>
-      <h1>Settings</h1>
-      {!online && <p className="notice">Offline: showing preferences saved on this device. Saving needs a connection.</p>}
-      <form onSubmit={save}>
+      <header className="page-head">
+        <p className="eyebrow">
+          <span>Kit list</span>
+        </p>
+        <h1 className="display small">Settings</h1>
+      </header>
+      {!online && <StateNote kind="offline">Offline: showing preferences saved on this device. Saving needs a connection.</StateNote>}
+      <FieldLabel n={1}>Preferences</FieldLabel>
+      <form className="sheet settings-form" onSubmit={save}>
         <fieldset>
           <legend>Mission preferences</legend>
           <div className="row">
@@ -189,12 +203,12 @@ export function Settings() {
         )}
       </form>
 
-      <h2>Location (optional)</h2>
+      <FieldLabel n={2}>Location (optional)</FieldLabel>
       <p>
         ShadeLoop never tracks you. If you opt in, your browser is asked once for your position, which is rounded to about 1 km on this device. It is sent only when you plan a mission, to find mapped parks
         and check the weather.
       </p>
-      <p className="meta num">{coarse ? `Saved: ${coarse.lat}, ${coarse.lon} (rounded)` : 'No location saved.'}</p>
+      <p className="coords num">{coarse ? `Saved: ${coarse.lat}, ${coarse.lon} (rounded)` : 'No location saved.'}</p>
       <div className="row">
         <button type="button" onClick={shareLocation} disabled={!('geolocation' in navigator)}>
           {coarse ? 'Update approximate location' : 'Use my approximate location'}
@@ -211,7 +225,7 @@ export function Settings() {
         </p>
       )}
 
-      <h2>Integrations</h2>
+      <FieldLabel n={3}>Integrations</FieldLabel>
       <p className="hint">Status comes from the server. “Verified” means a live call succeeded, not just that a key is present.</p>
       {deps ? (
         <div className="scroll-x" role="region" aria-label="Integration status" tabIndex={0}>
@@ -250,10 +264,10 @@ export function Settings() {
           <p className="meta">Not implemented: {deps.notImplemented.join(', ')}.</p>
         </div>
       ) : (
-        <p className="meta">{online ? 'Loading…' : 'Unavailable offline.'}</p>
+        <StateNote kind={online ? 'loading' : 'offline'}>{online ? 'Checking integrations…' : 'Unavailable offline.'}</StateNote>
       )}
 
-      <h2>Your data</h2>
+      <FieldLabel n={4}>Your data</FieldLabel>
       <p>
         Your data is tied to an anonymous session on this device. There are no accounts. Observations about a place contribute to shared, anonymous evidence counts; notes you type are never stored.
       </p>

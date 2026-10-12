@@ -5,6 +5,7 @@ import { cacheMission, dismissOp, enqueue, flush, getCached, getMeta, listCached
 import { Completion, FieldMode } from './Field.tsx';
 import { Settings } from './Settings.tsx';
 import { canOfferUpdate } from './update.ts';
+import { Contours, FieldLabel, Glyph, Sprig, Stamp, StateNote, Trail } from './Marks.tsx';
 
 export const label = (s: string) => s.replace(/_/g, ' ');
 export const go = (path: string) => {
@@ -90,12 +91,13 @@ function SyncBadge() {
   const waiting = ops.filter((o) => o.state !== 'synced').length - conflicts;
   // Only connectivity and problems are announced; the waiting count changes on every tap and would be noise.
   return (
-    <span className={`sync${conflicts || (!online && waiting) ? ' warn' : ''}`}>
+    <span className={`sync${conflicts || (!online && waiting) ? ' warn' : ''}${online ? '' : ' off'}`}>
+      <span className="sync-dot" aria-hidden="true" />
       <span role="status">
         {online ? 'Online' : 'Offline'}
         {conflicts ? ` · ${conflicts} need attention` : ''}
       </span>
-      {!conflicts && (waiting ? ` · ${waiting} waiting to sync` : ' · all synced')}
+      <span className="sync-extra">{!conflicts && (waiting ? ` · ${waiting} waiting` : ' · synced')}</span>
     </span>
   );
 }
@@ -116,7 +118,7 @@ function SyncProblems() {
 
   return (
     <section className="notice warn" aria-labelledby="sync-problems">
-      <h2 id="sync-problems" style={{ marginTop: 0 }}>
+      <h2 id="sync-problems" className="flush">
         Sync needs your attention
       </h2>
       <ul>
@@ -137,7 +139,7 @@ function SyncProblems() {
                   </li>
                 ))}
               </ul>
-              <div className="row" style={{ marginTop: '0.4rem' }}>
+              <div className="row gap-top">
                 {!c?.gone && (
                   <button type="button" onClick={() => void Promise.all(mine.map((o) => retryOp(o.opId))).then(kick)}>
                     Try again
@@ -156,7 +158,7 @@ function SyncProblems() {
         {stuck.map((o) => (
           <li key={o.opId}>
             <strong>{opText(o)}</strong>: still failing after {o.attempts} tries: {o.lastError}
-            <div className="row" style={{ marginTop: '0.4rem' }}>
+            <div className="row gap-top">
               <button type="button" onClick={() => void retryOp(o.opId).then(kick)}>
                 Retry now
               </button>
@@ -213,7 +215,7 @@ function MissionSummary({ m }: { m: Mission }) {
   return (
     <>
       <p className="row">
-        <span className="tag">{label(m.type)}</span>
+        <span className="tag type">{label(m.type)}</span>
         <span className="tag num">
           ~{m.estimatedMinutes} of {m.availableMinutes} min
         </span>
@@ -221,10 +223,8 @@ function MissionSummary({ m }: { m: Mission }) {
       </p>
       <p>{m.description}</p>
       <LocationLine m={m} />
-      <p style={{ margin: '0.6rem 0 0' }}>
-        <strong>Why it fits</strong>
-      </p>
-      <ul>
+      <p className="kicker">Why it fits</p>
+      <ul className="ticks">
         {m.whyItMatches.map((w, i) => (
           <li key={i}>
             {w.text} <span className="tag">{SOURCE_LABEL[w.sourceType]}</span>
@@ -297,17 +297,35 @@ function Discover() {
   const w = result?.planning.weather;
   return (
     <>
-      <h1>Find a short mission</h1>
-      <p className="hint">Describe what you want. Missions are checked against your time, walking limits and past field reports before you see them.</p>
-      <form onSubmit={submit}>
+      <section className="hero" aria-labelledby="discover-title">
+        <Contours className="hero-contours" />
+        <div className="hero-copy">
+          <p className="eyebrow">
+            <span>Field journal</span>
+            <span className="coords num">{coarse ? `${coarse.lat.toFixed(2)}° · ${coarse.lon.toFixed(2)}°` : 'location: not shared'}</span>
+          </p>
+          <h1 id="discover-title" className="display">
+            Go out for <mark>{minutes || '…'}</mark> minutes.
+            <span className="display-sub">Come back with notes.</span>
+          </h1>
+          <p className="lede">Describe the outing you want. Every mission is checked against your time, walking limits and past field reports before you see it.</p>
+        </div>
+        <Trail className="hero-trail" />
+        <Sprig className="hero-sprig" />
+      </section>
+
+      <form className="sheet plan" onSubmit={submit} aria-label="Plan a mission">
+        <span className="sheet-tab" aria-hidden="true">
+          Expedition brief
+        </span>
         <label htmlFor="prompt">What would you like to do?</label>
         <textarea id="prompt" value={prompt} maxLength={500} onChange={(e) => setPrompt(e.target.value)} placeholder="e.g. a quiet 20 minute break somewhere shady" />
-        <div className="row" style={{ alignItems: 'flex-end' }}>
-          <div style={{ flex: '1 1 8rem' }}>
+        <div className="plan-grid">
+          <div>
             <label htmlFor="minutes">Minutes available</label>
-            <input id="minutes" type="number" min={5} max={240} value={minutes} onChange={(e) => setMinutes(e.target.value)} />
+            <input id="minutes" className="num" type="number" min={5} max={240} value={minutes} onChange={(e) => setMinutes(e.target.value)} />
           </div>
-          <div style={{ flex: '2 1 12rem' }}>
+          <div>
             <label htmlFor="type">Mission type</label>
             <select id="type" value={type} onChange={(e) => setType(e.target.value)}>
               <option value="">Let ShadeLoop choose</option>
@@ -319,13 +337,13 @@ function Discover() {
             </select>
           </div>
         </div>
-        <fieldset>
+        <fieldset className="chips">
           <legend>Must have (only places without contrary reports)</legend>
           <div className="row">
             {CONDITIONS.map((c) => (
-              <label key={c} className="check">
+              <label key={c} className="chip">
                 <input type="checkbox" checked={required.includes(c)} onChange={(e) => setRequired((r) => (e.target.checked ? [...r, c] : r.filter((x) => x !== c)))} />
-                {label(c)}
+                <span>{label(c)}</span>
               </label>
             ))}
           </div>
@@ -333,15 +351,17 @@ function Discover() {
         <p className="hint">
           {coarse ? 'Your approximate location (about 1 km) will be used to find mapped parks and check the weather.' : 'No location shared. Missions will not name a specific place. You can opt in under Settings.'}
         </p>
-        <button className="primary" type="submit" disabled={busy || !online} aria-describedby={!online ? 'offline-note' : undefined}>
+        <button className="primary big" type="submit" disabled={busy || !online} aria-describedby={!online ? 'offline-note' : undefined}>
           {busy ? 'Planning… (a local model can take a minute)' : 'Suggest missions'}
+          {!busy && <span aria-hidden="true">→</span>}
         </button>
         {!online && (
-          <p id="offline-note" className="notice">
-            Planning needs a connection. Missions you already opened work offline below.
-          </p>
+          <div id="offline-note">
+            <StateNote kind="offline">Planning needs a connection. Missions you already opened work offline below.</StateNote>
+          </div>
         )}
       </form>
+      {busy && <StateNote kind="loading">Checking routes, weather and field reports…</StateNote>}
       {error && (
         <p className="notice error" role="alert">
           Could not plan missions: {error}
@@ -350,18 +370,22 @@ function Discover() {
 
       {result && g && (
         <section aria-labelledby="results">
-          <h2 id="results">Suggestions</h2>
-          <p className="meta">
-            {g.generator === 'ai' ? `Generated by ${g.model} (${g.provider}) and checked by the rule engine.` : `Built from templates. AI was not used: ${g.fallbackReason}.`}
-            {result.planning.parse && ` Request understood via ${result.planning.parse.method === 'ai' ? 'AI' : 'keyword matching'}.`}
-          </p>
-          {w && (
-            <p className="meta num">
-              {w.available
-                ? `Weather (Open-Meteo, ${new Date(w.observedAt!).toLocaleTimeString()}): ${w.temperatureC}°C, feels ${w.apparentTemperatureC}°C, ${w.precipitationMm} mm precipitation.`
-                : `Weather unavailable (${w.reason}).`}
+          <FieldLabel n={1} id="results">
+            Suggestions
+          </FieldLabel>
+          <div className="source-strip">
+            <p className="meta">
+              {g.generator === 'ai' ? `Generated by ${g.model} (${g.provider}) and checked by the rule engine.` : `Built from templates. AI was not used: ${g.fallbackReason}.`}
+              {result.planning.parse && ` Request understood via ${result.planning.parse.method === 'ai' ? 'AI' : 'keyword matching'}.`}
             </p>
-          )}
+            {w && (
+              <p className="meta num">
+                {w.available
+                  ? `Weather (Open-Meteo, ${new Date(w.observedAt!).toLocaleTimeString()}): ${w.temperatureC}°C, feels ${w.apparentTemperatureC}°C, ${w.precipitationMm} mm precipitation.`
+                  : `Weather unavailable (${w.reason}).`}
+              </p>
+            )}
+          </div>
           {result.planning.discovery?.sources
             .filter((s) => !s.ok)
             .map((s) => (
@@ -374,32 +398,41 @@ function Discover() {
               {l}
             </p>
           ))}
-          <ul className="list">
-            {result.missions.map((m) => (
-              <li key={m.id}>
-                <h3 style={{ marginTop: 0 }}>{m.title}</h3>
+          {result.missions.length === 0 && <StateNote kind="empty">No missions fit those limits. Try more minutes or fewer must-haves.</StateNote>}
+          <ol className="entries">
+            {result.missions.map((m, i) => (
+              <li key={m.id} className="entry">
+                <span className="entry-no num" aria-hidden="true">
+                  {String(i + 1).padStart(2, '0')}
+                </span>
+                <h3 className="entry-title">{m.title}</h3>
                 <MissionSummary m={m} />
-                <button className="primary" type="button" style={{ marginTop: '0.6rem' }} onClick={() => go(`/m/${m.id}`)}>
-                  Open mission
+                <button className="primary" type="button" onClick={() => go(`/m/${m.id}`)}>
+                  Open mission <span aria-hidden="true">→</span>
                 </button>
               </li>
             ))}
-          </ul>
+          </ol>
         </section>
       )}
 
-      {cached.length > 0 && (
-        <section aria-labelledby="saved">
-          <h2 id="saved">On this device</h2>
-          <ul className="list">
+      <section aria-labelledby="saved">
+        <FieldLabel n={result ? 2 : 1} id="saved">
+          On this device
+        </FieldLabel>
+        {cached.length === 0 ? (
+          <StateNote kind="empty">Your logbook is empty. Missions you open are kept here and work offline.</StateNote>
+        ) : (
+          <ul className="logbook">
             {cached.slice(0, 10).map((c) => (
               <li key={c.id}>
-                <a href={`#/m/${c.id}`}>{c.mission.title}</a> <span className="meta">· {label(c.local.status)}</span>
+                <a href={`#/m/${c.id}`}>{c.mission.title}</a>
+                <Stamp tone={c.local.status}>{label(c.local.status)}</Stamp>
               </li>
             ))}
           </ul>
-        </section>
-      )}
+        )}
+      </section>
     </>
   );
 }
@@ -444,7 +477,16 @@ function MissionDetail({ id }: { id: string }) {
     return unsub;
   }, [id]);
 
-  if (!c) return error ? <p role="alert">Could not load this mission: {error}</p> : <p>{online ? 'Loading…' : 'This mission is not saved on this device.'}</p>;
+  if (!c)
+    return error ? (
+      <p className="notice error" role="alert">
+        Could not load this mission: {error}
+      </p>
+    ) : online ? (
+      <StateNote kind="loading">Opening the mission…</StateNote>
+    ) : (
+      <StateNote kind="offline">This mission is not saved on this device.</StateNote>
+    );
   const { mission: m, local } = c;
 
   async function start() {
@@ -462,25 +504,33 @@ function MissionDetail({ id }: { id: string }) {
 
   return (
     <>
-      <h1>{m.title}</h1>
-      <p className="meta">
-        Status: <strong>{label(local.status)}</strong>
-      </p>
-      <p>
-        <strong>Objective:</strong> {m.objective}
-      </p>
-      <MissionSummary m={m} />
-      <h2>Steps</h2>
+      <header className="page-head">
+        <p className="eyebrow">
+          <span>Mission</span>
+          <Stamp tone={local.status}>
+            <span className="sr-only">Status: </span>
+            {label(local.status)}
+          </Stamp>
+        </p>
+        <h1 className="display small">{m.title}</h1>
+        <p className="objective">
+          <strong>Objective</strong> {m.objective}
+        </p>
+      </header>
+      <div className="sheet">
+        <MissionSummary m={m} />
+      </div>
+      <FieldLabel n={1}>Steps</FieldLabel>
       <ol className="steps">
         {m.steps.map((s, i) => (
           <li key={i}>
-            {s.text} <span className="meta num">({s.minutes} min)</span>
+            <span className="step-text">{s.text}</span> <span className="meta num">{s.minutes} min</span>
           </li>
         ))}
       </ol>
       {m.expectations.length > 0 && (
         <>
-          <h2>What reports say so far</h2>
+          <FieldLabel n={2}>What reports say so far</FieldLabel>
           <table>
             <thead>
               <tr>
@@ -503,14 +553,14 @@ function MissionDetail({ id }: { id: string }) {
         </>
       )}
       {online && m.selectedLocation && <PlaceHours locationId={m.selectedLocation.id} />}
-      <h2>Safety</h2>
-      <ul>
+      <FieldLabel n={m.expectations.length > 0 ? 3 : 2}>Safety</FieldLabel>
+      <ul className="safety">
         {m.safetyNotes.map((s) => (
           <li key={s}>{s}</li>
         ))}
       </ul>
       {c.gone && <GoneNotice id={id} />}
-      <div className="row" style={{ marginTop: '1.2rem' }}>
+      <div className="row actions">
         {!c.gone && local.status === 'planned' && (
           <>
             <button className="primary" type="button" onClick={() => void start()}>
@@ -560,16 +610,24 @@ function History() {
 
   return (
     <>
-      <h1>History &amp; insights</h1>
+      <header className="page-head">
+        <p className="eyebrow">
+          <span>Logbook</span>
+        </p>
+        <h1 className="display small">History &amp; insights</h1>
+      </header>
       {error && (
         <p className="notice error" role="alert">
           Could not load history: {error}
         </p>
       )}
-      {!online && <p className="notice">Offline: showing missions saved on this device only.</p>}
+      {!online && <StateNote kind="offline">Offline: showing missions saved on this device only.</StateNote>}
+      {online && !overview && !error && <StateNote kind="loading">Reading your logbook…</StateNote>}
       {overview && (
         <section aria-labelledby="insights">
-          <h2 id="insights">Your numbers</h2>
+          <FieldLabel n={1} id="insights">
+            Your numbers
+          </FieldLabel>
           <dl className="facts num">
             <dt>Completed missions</dt>
             <dd>{overview.missions.completed}</dd>
@@ -586,7 +644,7 @@ function History() {
           </dl>
           {attrs.length > 0 && (
             <table>
-              <caption className="meta" style={{ textAlign: 'left' }}>
+              <caption className="meta">
                 Your observations, and how often they matched what reports predicted
               </caption>
               <thead>
@@ -613,13 +671,14 @@ function History() {
           )}
         </section>
       )}
-      <h2>Past missions</h2>
-      {items && items.length === 0 && <p>No completed or cancelled missions yet.</p>}
-      <ul className="list">
+      <FieldLabel n={overview ? 2 : 1}>Past missions</FieldLabel>
+      {items && items.length === 0 && <StateNote kind="empty">No completed or cancelled missions yet. Your first one will be logged here.</StateNote>}
+      <ul className="logbook">
         {(items ?? cached.filter((c) => c.local.status === 'completed' || c.local.status === 'cancelled').map((c) => ({ mission: c.mission, report: null, local: c.local }))).map((it) => (
           <li key={it.mission.id}>
-            <a href={`#/m/${it.mission.id}`}>{it.mission.title}</a> <span className="meta">· {label(it.mission.status)}</span>
-            {it.report && <p className="meta">{it.report.summary}</p>}
+            <a href={`#/m/${it.mission.id}`}>{it.mission.title}</a>
+            <Stamp tone={it.mission.status}>{label(it.mission.status)}</Stamp>
+            {it.report && <p className="meta logbook-note">{it.report.summary}</p>}
           </li>
         ))}
       </ul>
@@ -677,7 +736,8 @@ export function App({ onUpdate }: { onUpdate?: () => void }) {
       <header className="top">
         <div className="top-inner">
           <a className="brand" href="#/">
-            ShadeLoop
+            <Glyph />
+            <span>ShadeLoop</span>
           </a>
           <nav aria-label="Main">
             <ul>
@@ -693,10 +753,10 @@ export function App({ onUpdate }: { onUpdate?: () => void }) {
           <SyncBadge />
         </div>
       </header>
-      <main id="main" ref={mainRef} tabIndex={-1}>
+      <main id="main" ref={mainRef} tabIndex={-1} className={page === 'field' ? 'is-field' : undefined}>
         {onUpdate && canOfferUpdate(route, dirty) && (
           <p className="notice row" role="status">
-            <span style={{ flex: '1 1 12rem' }}>A new version of ShadeLoop is ready. Unsynced changes stay on this device.</span>
+            <span className="grow">A new version of ShadeLoop is ready. Unsynced changes stay on this device.</span>
             <button type="button" onClick={onUpdate}>
               Reload
             </button>
@@ -717,6 +777,10 @@ export function App({ onUpdate }: { onUpdate?: () => void }) {
           <Discover />
         )}
       </main>
+      <footer className="foot">
+        <span>ShadeLoop · field journal</span>
+        <span>Go outside. Write it down.</span>
+      </footer>
     </SyncCtx.Provider>
   );
 }

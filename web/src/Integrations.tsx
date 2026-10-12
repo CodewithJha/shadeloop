@@ -7,13 +7,13 @@ const ABOUT: Record<string, { title: string; powers: string; without: string }> 
   'ai:ollama': { title: 'Gemma via Ollama (local)', powers: 'Same as Gemma, running on your own machine.', without: 'Template missions and keyword parsing, labelled as such.' },
   ai: { title: 'Gemma (open-weight model)', powers: 'Reads your request and field notes, drafts missions. The rule engine checks every draft.', without: 'Template missions and keyword parsing, labelled as such.' },
   mongodb: { title: 'MongoDB Atlas', powers: 'Missions, observations, reports and shared place evidence.', without: 'Required. The app cannot plan or sync without it.' },
-  'tiger-data': { title: 'Tiger Data', powers: '“Reports here by time of day” on a mission’s place (TimescaleDB hypertable + 15-min aggregate).', without: 'The time-of-day panel stays hidden.' },
+  'tiger-data': { title: 'Tiger Data', powers: '“Reports here by time of day” (TimescaleDB hypertable + 15-min aggregate) and “Places with similar field reports” (pgvector cosine search over field-report fingerprints).', without: 'Both panels stay hidden.' },
   backboard: { title: 'Backboard', powers: 'Remembers your own earlier requests when “Remember my requests” is on.', without: 'Plans use only today’s request.' },
   openstreetmap: { title: 'OpenStreetMap Overpass', powers: 'Finds mapped parks, gardens and benches near your rounded location.', without: 'Missions don’t name a place, and say so.' },
   serpapi: { title: 'SerpApi', powers: 'Extra place results from Google Maps, next to OpenStreetMap.', without: 'OpenStreetMap results only.' },
   'open-meteo': { title: 'Open-Meteo', powers: 'Current weather and heat, cold or rain safety notes.', without: 'Missions tell you to check conditions yourself.' },
   fixture: { title: 'Sample places', powers: 'Labelled fake places for offline demos.', without: 'Off in production.' },
-  elevenlabs: { title: 'ElevenLabs', powers: 'Reads Field Mode steps aloud in a natural voice.', without: 'Your browser’s built-in voice reads them instead.' },
+  elevenlabs: { title: 'ElevenLabs', powers: 'Reads Field Mode steps aloud, and reads your completion report back.', without: 'Your browser’s built-in voice reads them instead.' },
   'web-speech': { title: 'Browser speech', powers: 'Dictation for notes and the offline read-aloud voice.', without: 'Type notes instead.' },
   sentry: { title: 'Sentry Agent Tracing', powers: 'Traces each plan as an agent run: tool calls, model calls, tokens, fallbacks.', without: 'No traces; the app works the same.' },
 };
@@ -67,6 +67,46 @@ function Card({ d }: { d: Dependency }) {
   );
 }
 
+/** Build and deploy tooling. Static by design: these aren't runtime services, so there is no live status to show. */
+const BUILT_WITH: { title: string; what: string; links: [string, string][] }[] = [
+  { title: 'Render', what: 'Hosts the app and API as one Docker web service, defined in render.yaml and the Dockerfile.', links: [['shadeloop.onrender.com', 'https://shadeloop.onrender.com']] },
+  {
+    title: 'GitHub Copilot',
+    what: 'The Copilot CLI fixed the flaky concurrency test in issue #1 (commit 89b8ead). GitHub Actions runs lint, typecheck, tests, build, a security scan and the Docker build on every push.',
+    links: [
+      ['Issue #1', 'https://github.com/CodewithJha/shadeloop/issues/1'],
+      ['Commit 89b8ead', 'https://github.com/CodewithJha/shadeloop/commit/89b8eada487181a88134341db161312060d1bce4'],
+    ],
+  },
+  { title: 'Entire', what: 'The public agent session behind that fix, so you can see why the code exists.', links: [['Agent session', 'https://entire.io/gh/CodewithJha/shadeloop/commit/89b8eada487181a88134341db161312060d1bce4']] },
+];
+
+function BuiltWith() {
+  return (
+    <section className="integ-group" aria-label="Built and shipped with">
+      <h3 className="integ-group-title">Built &amp; shipped with</h3>
+      <ul className="integ-list">
+        {BUILT_WITH.map((b) => (
+          <li key={b.title} className="integ tooling">
+            <div className="integ-head">
+              <h4>{b.title}</h4>
+              <span className="integ-status tooling">Build &amp; deploy tooling</span>
+            </div>
+            <p className="integ-powers">{b.what}</p>
+            <p className="integ-links">
+              {b.links.map(([text, href]) => (
+                <a key={href} href={href} target="_blank" rel="noreferrer">
+                  {text} <span aria-hidden="true">↗</span>
+                </a>
+              ))}
+            </p>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 export function Integrations({ deps }: { deps: { dependencies: Dependency[]; notImplemented: string[] } }) {
   const list = deps.dependencies;
   const count = (tone: string) => list.filter((d) => (STATUS[d.status]?.tone ?? 'off') === tone).length;
@@ -90,6 +130,7 @@ export function Integrations({ deps }: { deps: { dependencies: Dependency[]; not
           </ul>
         </section>
       ))}
+      <BuiltWith />
       {deps.notImplemented.length > 0 && <p className="meta">Not used on purpose: {deps.notImplemented.join(', ')}. Nothing is added just for decoration.</p>}
     </div>
   );

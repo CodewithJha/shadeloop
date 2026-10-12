@@ -395,3 +395,7 @@ td .tag { white-space: normal; }
 .field-kit { list-style: none; display: flex; flex-wrap: wrap; gap: var(--s2); padding: 0; margin: 0 0 var(--s4); }
 .field-kit li { font-family: var(--mono); font-size: 0.74rem; border: 1.5px solid var(--ink); background: var(--white); padding: 0.15rem 0.5rem; }
 .field-kit li span { font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--forest); margin-right: 0.25rem; }
+.integ.tooling { background: var(--paper-2); box-shadow: 4px 4px 0 var(--olive); }
+.integ-status.tooling { border: 1.5px solid var(--ink-2); padding: 0.05rem 0.4rem; transform: rotate(-2deg); background: var(--paper); }
+.integ-links { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s4); margin: auto 0 0; padding-top: var(--s2); border-top: 1px dashed var(--rule); max-width: none; }
+.integ-links a { font-family: var(--mono); font-size: 0.8rem; font-weight: 600; min-height: 44px; display: inline-flex; align-items: center; }

@@ -210,39 +210,100 @@ export async function loadLocations(ids: string[], origin?: Coords): Promise<Loc
   return docs.map(({ _id, lastCheckedAt: _l, ...d }) => ({ ...d, id: _id, ...(o && d.coords ? { distanceM: distanceM(o, d.coords) } : {}) }));
 }
 
+// MET Norway's terms ask for an identifying User-Agent with contact info and at most 4 decimals in coordinates.
+const MET_UA = 'ShadeLoop/1.0 github.com/CodewithJha/shadeloop';
+
+async function openMeteo(origin: Coords): Promise<WeatherView> {
+  return cached(`weather:${origin.lat},${origin.lon}`, async () => {
+    const url = new URL(env.OPEN_METEO_URL);
+    url.search = new URLSearchParams({
+      latitude: String(origin.lat),
+      longitude: String(origin.lon),
+      current: 'temperature_2m,apparent_temperature,precipitation,wind_speed_10m,weather_code',
+    }).toString();
+    const res = await fetchOk('Open-Meteo', url, { headers: { 'user-agent': UA } });
+    const retrievedAt = new Date().toISOString();
+    const { current: c } = (await res.json()) as {
+      current?: { time: string; temperature_2m: number; apparent_temperature: number; precipitation: number; wind_speed_10m: number; weather_code: number };
+    };
+    if (!c || typeof c.temperature_2m !== 'number') throw new Error('Open-Meteo response missing current data');
+    return {
+      available: true,
+      source: 'open-meteo' as const,
+      retrievedAt,
+      observedAt: `${c.time}Z`,
+      temperatureC: c.temperature_2m,
+      apparentTemperatureC: c.apparent_temperature,
+      precipitationMm: c.precipitation,
+      windKmh: c.wind_speed_10m,
+      weatherCode: c.weather_code,
+    };
+  });
+}
+
+type MetResponse = {
+  properties?: {
+    timeseries?: {
+      time: string;
+      data: {
+        instant: { details: { air_temperature?: number; wind_speed?: number } };
+        next_1_hours?: { details?: { precipitation_amount?: number } };
+      };
+    }[];
+  };
+};
+
+/** Maps a MET Norway compact forecast to WeatherView. It has no "feels like" or WMO code, so those stay undefined. */
+export function mapMetNorway(body: MetResponse, retrievedAt: string): WeatherView {
+  const now = Date.now();
+  const series = body.properties?.timeseries ?? [];
+  // The first entry is the current hour; skip any that are already more than an hour old.
+  const t = series.find((x) => Date.parse(x.time) >= now - 3_600_000) ?? series[0];
+  const d = t?.data.instant.details;
+  if (!t || typeof d?.air_temperature !== 'number') throw new Error('MET Norway response missing current data');
+  const precip = t.data.next_1_hours?.details?.precipitation_amount;
+  return {
+    available: true,
+    source: 'met-norway',
+    retrievedAt,
+    observedAt: t.time,
+    temperatureC: d.air_temperature,
+    ...(typeof precip === 'number' ? { precipitationMm: precip } : {}),
+    ...(typeof d.wind_speed === 'number' ? { windKmh: Math.round(d.wind_speed * 3.6 * 10) / 10 } : {}),
+  };
+}
+
+async function metNorway(origin: Coords): Promise<WeatherView> {
+  const lat = Math.round(origin.lat * 1e4) / 1e4;
+  const lon = Math.round(origin.lon * 1e4) / 1e4;
+  return cached(`weather-met:${lat},${lon}`, async () => {
+    const url = new URL(env.MET_NORWAY_URL);
+    url.search = new URLSearchParams({ lat: String(lat), lon: String(lon) }).toString();
+    const res = await fetchOk('MET Norway', url, { headers: { 'user-agent': MET_UA } });
+    return mapMetNorway((await res.json()) as MetResponse, new Date().toISOString());
+  });
+}
+
+/** Open-Meteo first; MET Norway when it fails or rate-limits us. Never rejects: failures become `available: false`. */
 export async function getWeather(rawOrigin: Coords): Promise<WeatherView> {
   const origin = roundCoords(rawOrigin);
+  let reason: string;
   try {
-    return await cached(`weather:${origin.lat},${origin.lon}`, async () => {
-      const url = new URL(env.OPEN_METEO_URL);
-      url.search = new URLSearchParams({
-        latitude: String(origin.lat),
-        longitude: String(origin.lon),
-        current: 'temperature_2m,apparent_temperature,precipitation,wind_speed_10m,weather_code',
-      }).toString();
-      const res = await fetchOk('Open-Meteo', url, { headers: { 'user-agent': UA } });
-      const retrievedAt = new Date().toISOString();
-      const { current: c } = (await res.json()) as {
-        current?: { time: string; temperature_2m: number; apparent_temperature: number; precipitation: number; wind_speed_10m: number; weather_code: number };
-      };
-      if (!c || typeof c.temperature_2m !== 'number') throw new Error('Open-Meteo response missing current data');
-      recordCall('open-meteo', true, 'current weather returned');
-      return {
-        available: true,
-        source: 'open-meteo' as const,
-        retrievedAt,
-        observedAt: `${c.time}Z`,
-        temperatureC: c.temperature_2m,
-        apparentTemperatureC: c.apparent_temperature,
-        precipitationMm: c.precipitation,
-        windKmh: c.wind_speed_10m,
-        weatherCode: c.weather_code,
-      };
-    });
+    const w = await openMeteo(origin);
+    recordCall('open-meteo', true, 'current weather returned');
+    return w;
   } catch (e) {
-    const reason = errorText(e);
+    reason = errorText(e);
     recordCall('open-meteo', false, reason);
-    return { available: false, source: 'open-meteo', retrievedAt: new Date().toISOString(), reason };
+  }
+  try {
+    const w = await metNorway(origin);
+    recordCall('met-norway', true, `current weather returned (Open-Meteo failed: ${reason})`);
+    return { ...w, fallbackFrom: { source: 'open-meteo', reason } };
+  } catch (e) {
+    const metReason = errorText(e);
+    recordCall('met-norway', false, metReason);
+    return { available: false, source: 'open-meteo', retrievedAt: new Date().toISOString(), reason, fallbackReason: `MET Norway fallback: ${metReason}` };
   }
 }
 

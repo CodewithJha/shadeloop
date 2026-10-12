@@ -14,6 +14,8 @@ describe('integration status', () => {
   it('marks a rate-limited weather source amber, other weather failures red', () => {
     expect(statusFor(dep('open-meteo', 'DEGRADED', 'Open-Meteo HTTP 429'), []).tone).toBe('covered');
     expect(statusFor(dep('open-meteo', 'DEGRADED', 'timeout'), []).tone).toBe('fail');
+    const metLive = [dep('met-norway', 'VERIFIED', 'current weather returned')];
+    expect(statusFor(dep('open-meteo', 'DEGRADED', 'timeout'), metLive).text).toMatch(/covered by MET Norway/);
   });
   it('never upgrades a status to live', () => {
     expect(statusFor(dep('sentry', 'CONFIGURED'), []).tone).toBe('ready');

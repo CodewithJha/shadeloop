@@ -246,7 +246,9 @@ async function plan(ownerId: string, input: PlanRequest) {
   // Weather needs only the origin, so it runs alongside discovery. It never rejects (failures become `available: false`).
   const weatherP = origin
     ? logged(steps, t0, 'get_weather', () => tool('get_weather', () => getWeather(origin)), (w) =>
-        w.available ? { ok: true, detail: `Open-Meteo: ${w.temperatureC}°C, feels ${w.apparentTemperatureC}°C` } : { ok: false, detail: `Open-Meteo unavailable: ${w.reason}` },
+        w.available
+          ? { ok: true, detail: `${w.fallbackFrom ? `Open-Meteo failed (${w.fallbackFrom.reason}) → ` : ''}${w.source === 'met-norway' ? 'MET Norway' : 'Open-Meteo'}: ${w.temperatureC}°C${w.apparentTemperatureC === undefined ? '' : `, feels ${w.apparentTemperatureC}°C`}` }
+          : { ok: false, detail: `Weather unavailable: ${w.reason}${w.fallbackReason ? `; ${w.fallbackReason}` : ''}` },
       )
     : Promise.resolve(null);
   let locations: LocationView[] = [];
@@ -292,7 +294,7 @@ async function plan(ownerId: string, input: PlanRequest) {
         ),
       })),
     ],
-    weather: weather?.available ? `${weather.temperatureC}°C, feels ${weather.apparentTemperatureC}°C, precipitation ${weather.precipitationMm} mm` : 'unknown',
+    weather: weather?.available ? `${weather.temperatureC}°C${weather.apparentTemperatureC === undefined ? '' : `, feels ${weather.apparentTemperatureC}°C`}${weather.precipitationMm === undefined ? '' : `, precipitation ${weather.precipitationMm} mm`}` : 'unknown',
     rememberedRequests: remembered,
   }), (r) =>
     r.data ? { ok: true, detail: `${r.meta.model} drafted ${r.data.missions.length} candidate${r.data.missions.length === 1 ? '' : 's'} (${r.meta.attempts} call${r.meta.attempts === 1 ? '' : 's'})` } : { ok: false, detail: r.meta.model ? `${r.meta.model} gave no usable drafts: ${r.meta.fallbackReason}` : `AI not used: ${r.meta.fallbackReason}` },

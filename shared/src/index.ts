@@ -261,7 +261,9 @@ export interface Mission {
 
 export interface WeatherView {
   available: boolean;
-  source: 'open-meteo';
+  source: 'open-meteo' | 'met-norway';
+  /** Set when this reading came from a fallback source; says why the primary was skipped. */
+  fallbackFrom?: { source: 'open-meteo'; reason: string };
   retrievedAt: string;
   observedAt?: string;
   temperatureC?: number;
@@ -270,6 +272,8 @@ export interface WeatherView {
   windKmh?: number;
   weatherCode?: number;
   reason?: string;
+  /** Why the MET Norway fallback also failed, when it did. */
+  fallbackReason?: string;
 }
 
 export type ComparisonResult = 'matched' | 'observed_lower_than_expected' | 'observed_higher_than_expected' | 'no_expectation';

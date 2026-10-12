@@ -262,7 +262,7 @@ function FieldKit({ p }: { p: PlanResponse['planning'] }) {
   items.push(g.generator === 'ai' ? ['Drafted', g.model ?? 'AI'] : ['Drafted', 'templates']);
   items.push(['Checked', 'rule engine']);
   for (const s of p.discovery?.sources ?? []) if (s.ok) items.push(['Places', `${s.name} · ${s.count}`]);
-  if (p.weather?.available) items.push(['Weather', 'Open-Meteo']);
+  if (p.weather?.available) items.push(['Weather', p.weather.source === 'met-norway' ? `MET Norway${p.weather.fallbackFrom ? ' (Open-Meteo failed)' : ''}` : 'Open-Meteo']);
   if (p.memory) items.push(['Memory', `Backboard · ${p.memory.recalled} recalled${p.memory.saved ? ', saved' : ''}`]);
   return (
     <ul className="field-kit" aria-label="What ran for this plan">
@@ -473,7 +473,7 @@ function Discover() {
             {w && (
               <p className="meta num">
                 {w.available
-                  ? `Weather (Open-Meteo, ${new Date(w.observedAt!).toLocaleTimeString()}): ${w.temperatureC}°C, feels ${w.apparentTemperatureC}°C, ${w.precipitationMm} mm precipitation.`
+                  ? `Weather (${w.source === 'met-norway' ? 'MET Norway' : 'Open-Meteo'}, ${new Date(w.observedAt!).toLocaleTimeString()}): ${w.temperatureC}°C${w.apparentTemperatureC === undefined ? '' : `, feels ${w.apparentTemperatureC}°C`}${w.precipitationMm === undefined ? '' : `, ${w.precipitationMm} mm precipitation`}.`
                   : `Weather unavailable (${w.reason}).`}
               </p>
             )}

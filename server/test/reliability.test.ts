@@ -7,7 +7,7 @@ import type { Db } from 'mongodb';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { closeDb, col, connectDb, ensureIndexes } from '../src/db.ts';
 import { createApp } from '../src/app.ts';
-import { clearProviderCache, discover, getWeather } from '../src/providers.ts';
+import { clearProviderCache, discover, getWeather, mapMetNorway } from '../src/providers.ts';
 import { clearAiHealthCache } from '../src/ai.ts';
 import { lastCall } from '../src/integrations.ts';
 import { env, RULES } from '../src/config.ts';
@@ -388,5 +388,41 @@ describe('Overpass mirror failover', () => {
     routes = () => new Response('x', { status: 504 });
     const bad = await discover({ lat: 12.6, lon: 77.6 });
     expect(bad.sources[0]).toMatchObject({ ok: false, error: 'Overpass HTTP 504' });
+  });
+});
+
+describe('MET Norway weather fallback', () => {
+  const met = (time = new Date().toISOString()) => ({
+    properties: { timeseries: [{ time, data: { instant: { details: { air_temperature: 29.1, wind_speed: 2.5 } }, next_1_hours: { details: { precipitation_amount: 0.4 } } } }] },
+  });
+  it('maps the compact forecast without inventing feels-like or a weather code', () => {
+    const w = mapMetNorway(met('2099-01-01T10:00:00Z'), 'now');
+    expect(w).toMatchObject({ available: true, source: 'met-norway', temperatureC: 29.1, windKmh: 9, precipitationMm: 0.4 });
+    expect(w.apparentTemperatureC).toBeUndefined();
+    expect(w.weatherCode).toBeUndefined();
+  });
+  it('falls back to MET Norway when Open-Meteo rate-limits, with 4-decimal coords and an identifying User-Agent', async () => {
+    let ua = '';
+    routes = (url, init) => {
+      if (url.includes('open-meteo')) return new Response('{}', { status: 429 });
+      if (url.includes('api.met.no')) {
+        ua = new Headers(init?.headers).get('user-agent') ?? '';
+        return json(met());
+      }
+      return down(url, init);
+    };
+    const w = await getWeather({ lat: 12.971234567, lon: 77.594612345 });
+    expect(w).toMatchObject({ available: true, source: 'met-norway', temperatureC: 29.1 });
+    expect(w.fallbackFrom?.reason).toMatch(/429/);
+    expect(ua).toMatch(/ShadeLoop\/1\.0 github\.com/);
+    const metUrl = calls.find((u) => u.includes('api.met.no'))!;
+    expect(new URL(metUrl).searchParams.get('lat')!.split('.')[1]?.length ?? 0).toBeLessThanOrEqual(4);
+  });
+  it('reports both failures honestly when MET Norway is also down', async () => {
+    routes = (url) => new Response('{}', { status: url.includes('open-meteo') ? 429 : 503 });
+    const w = await getWeather({ lat: 12.97, lon: 77.59 });
+    expect(w.available).toBe(false);
+    expect(w.reason).toMatch(/429/);
+    expect(w.fallbackReason).toMatch(/MET Norway fallback/);
   });
 });

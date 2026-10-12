@@ -11,6 +11,7 @@ const ABOUT: Record<string, { title: string; powers: string; without: string }> 
   backboard: { title: 'Backboard', powers: 'Remembers your own earlier requests when “Remember my requests” is on.', without: 'Plans use only today’s request.' },
   openstreetmap: { title: 'OpenStreetMap Overpass', powers: 'Finds mapped parks, gardens and benches near your rounded location.', without: 'Missions don’t name a place, and say so.' },
   serpapi: { title: 'SerpApi', powers: 'Extra place results from Google Maps, next to OpenStreetMap.', without: 'OpenStreetMap results only.' },
+  'met-norway': { title: 'MET Norway', powers: 'Backup weather when Open-Meteo fails or rate-limits us.', without: 'Weather is unavailable when Open-Meteo fails.' },
   'open-meteo': { title: 'Open-Meteo', powers: 'Current weather and heat, cold or rain safety notes.', without: 'Missions tell you to check conditions yourself.' },
   fixture: { title: 'Sample places', powers: 'Labelled fake places for offline demos.', without: 'Off in production.' },
   elevenlabs: { title: 'ElevenLabs', powers: 'Reads Field Mode steps aloud, and reads your completion report back.', without: 'Your browser’s built-in voice reads them instead.' },
@@ -20,7 +21,7 @@ const ABOUT: Record<string, { title: string; powers: string; without: string }> 
 
 const GROUPS: [string, (n: string) => boolean][] = [
   ['Open model', (n) => n === 'ai' || n.startsWith('ai:')],
-  ['Places & weather', (n) => ['openstreetmap', 'serpapi', 'open-meteo', 'fixture'].includes(n)],
+  ['Places & weather', (n) => ['openstreetmap', 'serpapi', 'open-meteo', 'met-norway', 'fixture'].includes(n)],
   ['Memory & data', (n) => ['mongodb', 'tiger-data', 'backboard'].includes(n)],
   ['Voice', (n) => ['elevenlabs', 'web-speech'].includes(n)],
   ['Observability', (n) => n === 'sentry'],
@@ -43,6 +44,7 @@ const STATUS: Record<string, { text: string; tone: string }> = {
 export function statusFor(d: Dependency, all: Dependency[]): { text: string; tone: string } {
   const live = (n: string) => all.find((x) => x.name === n)?.status === 'VERIFIED';
   if (d.status === 'DEGRADED' && d.name === 'openstreetmap' && live('serpapi')) return { text: 'Failing · covered by SerpApi', tone: 'covered' };
+  if (d.status === 'DEGRADED' && d.name === 'open-meteo' && live('met-norway')) return { text: 'Failing · covered by MET Norway', tone: 'covered' };
   if (d.status === 'DEGRADED' && d.name === 'open-meteo' && /rate limited|429/i.test(d.lastCall?.detail ?? '')) return { text: 'Rate-limited · missions say “check weather yourself”', tone: 'covered' };
   if (d.status === 'CONFIGURED' && d.name === 'fixture') return { text: 'On · sample places, not real', tone: 'ready' };
   if (d.status === 'CONFIGURED' && d.name === 'sentry') return { text: 'On · traces sent, delivery not confirmable here', tone: 'ready' };

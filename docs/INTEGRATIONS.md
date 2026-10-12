@@ -120,3 +120,7 @@ Listed in `notImplemented` from `/health/dependencies`.
 |---|---|
 | Mastra, Temporal, TabPFN | No real purpose in the current scope; not added as decoration |
 | ElevenLabs speech-to-text | Dictation uses the browser's speech recognition |
+
+## MET Norway weather fallback
+
+When Open-Meteo fails or rate-limits (it returned HTTP 429 from Render's shared IP on 12 Oct 2026), the server asks MET Norway Locationforecast 2.0 (free, no key) with an identifying User-Agent and coordinates rounded to 4 decimals, per its terms. It maps air temperature, wind (m/s to km/h) and next-hour precipitation. MET Norway has no feels-like temperature or WMO code, so those stay empty and the heat/cold notes based on feels-like do not fire. The process log, what-ran strip and integrations panel name the real source (for example "Open-Meteo failed (HTTP 429) → MET Norway: 29°C"). Live confirmation is pending a redeploy.

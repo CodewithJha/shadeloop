@@ -28,6 +28,7 @@ const Env = z
       .transform((v) => (v === 'none' ? '' : v).split(',').map((u) => u.trim()).filter(Boolean))
       .pipe(z.array(z.url())),
     OPEN_METEO_URL: z.url().default('https://api.open-meteo.com/v1/forecast'),
+    MET_NORWAY_URL: z.url().default('https://api.met.no/weatherapi/locationforecast/2.0/compact'),
     HTTP_TIMEOUT_MS: z.coerce.number().int().min(500).max(60_000).default(20_000),
     SENTRY_DSN: z.url().optional(),
     TIGER_DATABASE_URL: z.string().regex(/^postgres(ql)?:\/\//, 'must be a postgres:// URL').optional(),

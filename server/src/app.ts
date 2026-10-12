@@ -140,6 +140,13 @@ export function createApp() {
         lastCall: lastCall('open-meteo'),
       },
       {
+        name: 'met-norway',
+        role: 'Weather fallback when Open-Meteo fails',
+        status: statusFrom({ name: 'met-norway', enabled: true, configured: true, needsConfig: false }),
+        detail: 'No key needed. Used only when Open-Meteo fails. Status reflects the last real call.',
+        lastCall: lastCall('met-norway'),
+      },
+      {
         name: 'sentry',
         role: 'Agent tracing (planner, tool and model spans) and 5xx errors',
         status: Sentry.getClient() ? 'CONFIGURED' : 'NOT_CONFIGURED',

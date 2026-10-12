@@ -157,6 +157,7 @@ No variable needs a key or account: only `MONGODB_URI` is required. AI, SerpApi,
 | `SERPAPI_KEY` | none | Enables SerpApi Google Maps results |
 | `OVERPASS_URL` / `OPEN_METEO_URL` / `HTTP_TIMEOUT_MS` | public endpoints / `20000` | |
 | `OVERPASS_FALLBACK_URLS` | kumi.systems and private.coffee mirrors | Comma-separated Overpass mirrors tried in order (10 s each) when the main one fails; `none` disables |
+| `MET_NORWAY_URL` | MET Norway Locationforecast 2.0 compact | Free, keyless weather fallback used only when Open-Meteo fails or rate-limits |
 | `SENTRY_DSN` | none | Enables Sentry agent tracing and error reports |
 | `ELEVENLABS_API_KEY` / `ELEVENLABS_VOICE_ID` | none / a stock voice | Enables the ElevenLabs step voice |
 | `TIGER_DATABASE_URL` | none | Tiger Data `postgres://` URL; enables the time-of-day mirror |

@@ -14,16 +14,19 @@ Built for the DEV [Hacktoberfest Open-Source AI Challenge, Week 1: Touch Grass](
 |---|---|---|
 | **Gemma** (featured) | Gemma 4 (`gemma-4-26b-a4b-it`, AI Studio) in production, `gemma3:4b` through Ollama locally: parses requests and field notes, drafts missions. A deterministic engine accepts, shortens or rejects every draft | `server/src/ai.ts`, `server/src/missions.ts`, `docs/AI_POLICY.md` |
 | **Render** (featured) | Hosts the Docker image (API + PWA) at https://shadeloop.onrender.com from `render.yaml` | `render.yaml`, `Dockerfile` |
-| **Sentry Agent Tracing** | Each plan is an `invoke_agent plan_missions` trace with `execute_tool` spans (weather, places, memory) and `chat <model>` spans carrying token usage, attempts and fallbacks | `server/src/instrument.ts`, `server/src/integrations.ts` |
-| **ElevenLabs** | Reads Field Mode steps aloud (`eleven_flash_v2_5`) so your eyes stay on the trail; browser voice offline | `speak` in `server/src/providers.ts`, `web/src/Field.tsx` |
-| **Tiger Data** | TimescaleDB hypertable of place observations + 15-minute continuous aggregate behind "Reports here by time of day" | `server/src/tiger.ts` |
+| **Sentry Agent Tracing** | Each plan is an `invoke_agent plan_missions` trace with `execute_tool` spans (weather, places, memory) and `chat <model>` spans carrying token usage, attempts and fallbacks; voice (`speak_step`, `speak_report`) and similarity search (`similar_places`) are traced as tools too | `server/src/instrument.ts`, `server/src/integrations.ts` |
+| **ElevenLabs** | Reads Field Mode steps aloud (`eleven_flash_v2_5`) so your eyes stay on the trail, and reads the completion report back (“Listen to report”); browser voice offline, and the UI says which voice spoke | `speak` in `server/src/providers.ts`, `GET /missions/:id/steps/:n/speech`, `GET /reports/:id/speech`, `web/src/Field.tsx` |
+| **Tiger Data** | TimescaleDB hypertable of place observations + 15-minute continuous aggregate behind "Reports here by time of day", and **pgvector**: each place gets a 19-dimension field-report fingerprint (share of reports per attribute value), and `<=>` cosine search powers “Places with similar field reports” on a mission | `server/src/tiger.ts`, `GET /locations/:id/similar` |
 | **Backboard** | Opt-in memory of your own past requests ("no stairs"), recalled before planning, deleted with your data | `recall`/`remember` in `server/src/providers.ts` |
 | **MongoDB Atlas** | Source of truth for missions, observations, reports and the shared evidence model | `server/src/db.ts`, `server/src/missions.ts` |
+| **Visible in the app** | Every plan shows a “what ran” strip: which model read the request and drafted, that the rule engine checked it, which place sources returned how many results, weather, and Backboard recall. Only things that actually ran are listed | `FieldKit` in `web/src/App.tsx` |
+| **GitHub Copilot / Actions** | CI on every push (lint, typecheck, 124 server + 38 web tests, PWA build, audit, Docker build); Copilot issue #1 fixed in commit `89b8ead` | `.github/workflows/ci.yml` |
+| **Entire** | Agent session behind a real fix: https://entire.io/gh/CodewithJha/shadeloop/commit/89b8eada487181a88134341db161312060d1bce4 | |
 | **SerpApi** | Extra Google Maps place results next to OpenStreetMap (wired; not yet verified live) | `server/src/providers.ts` |
 
 Not used on purpose: Mastra, Temporal, TabPFN, Tinker, Arduino, DigitalOcean (no real job for them in this scope).
 
-**Timeline note (challenge rules):** the repository was started on 2026-10-11 at 12:31 IST (2026-10-10 23:01 PDT) and submitted before 11:59 PM PDT on 2026-10-11 (12:29 PM IST on 2026-10-12). Any commit dated after that deadline is listed here; at the time of writing there are none.
+**Timeline note (challenge rules):** the repository was started on 2026-10-11 at 12:31 IST (2026-10-10 23:01 PDT) and submitted before 11:59 PM PDT on 2026-10-11 (12:29 PM IST on 2026-10-12). Any commit dated after that deadline is listed here; commits on 2026-10-12 IST up to the submission are all before 12:29 IST (= 11:59 PM PDT, Oct 11).
 
 ## The problem
 
@@ -140,7 +143,7 @@ No variable needs a key or account: only `MONGODB_URI` is required. AI, SerpApi,
 npm run lint && npm run typecheck && npm test && npm run build
 ```
 
-There are 121 server tests (unit and integration, including an end-to-end field-truth-loop test) and 38 web tests (offline queue, API client, and a production build check of the PWA manifest, icons and service worker). External services are mocked in tests; there are no automated browser tests. See [docs/TEST_PLAN.md](docs/TEST_PLAN.md).
+There are 124 server tests (unit and integration, including an end-to-end field-truth-loop test) and 38 web tests (offline queue, API client, and a production build check of the PWA manifest, icons and service worker). External services are mocked in tests; there are no automated browser tests. See [docs/TEST_PLAN.md](docs/TEST_PLAN.md).
 
 ## Deployment
 

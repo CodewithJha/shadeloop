@@ -261,7 +261,7 @@ export function createApp() {
     const m = await getMission(owner(res), parse(Id, req.params.id));
     const step = m.steps[parse(z.coerce.number().int().min(0), req.params.n)];
     if (!step) throw new AppError(404, 'NOT_FOUND', 'No such step');
-    const audio = await speak(step.text).catch(() => {
+    const audio = await tool('speak_step', () => speak(step.text)).catch(() => {
       throw new AppError(503, 'DEPENDENCY_UNAVAILABLE', 'ElevenLabs is unavailable; use the browser voice');
     });
     res.type('audio/mpeg').set('cache-control', 'private, max-age=86400').send(audio);
@@ -271,7 +271,7 @@ export function createApp() {
   api.get('/reports/:id/speech', expensive, async (req, res) => {
     if (!env.ELEVENLABS_API_KEY) throw new AppError(404, 'NOT_CONFIGURED', 'ElevenLabs is not configured; use the browser voice');
     const report = await getReport(owner(res), parse(Id, req.params.id));
-    const audio = await speak(report.summary.text).catch(() => {
+    const audio = await tool('speak_report', () => speak(report.summary.text)).catch(() => {
       throw new AppError(503, 'DEPENDENCY_UNAVAILABLE', 'ElevenLabs is unavailable; use the browser voice');
     });
     res.type('audio/mpeg').set('cache-control', 'private, max-age=86400').send(audio);

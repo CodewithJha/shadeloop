@@ -17,7 +17,7 @@ tags: devchallenge, hf26challenge, opensource, ai
 **ShadeLoop** plans short outdoor missions (5–120 minutes) for people who have a gap in their day and want to spend it outside: a shady 20-minute break, a quiet bench, a slow nature walk. Then it gets out of the way.
 
 1. **Plan.** Type "a quiet 20 minute break somewhere shady". An open-weight model (Gemma) turns that into constraints and drafts missions around real mapped places (OpenStreetMap) and live weather (Open-Meteo).
-2. **Check.** A deterministic rule engine, not the model, decides what you see. It checks time, walking limits and safety text, uses real places only, and rejects any place where people have reported the opposite of what you asked for.
+2. **Check.** A deterministic rule engine, not the model, decides what you see. It checks time, walking limits and safety text, uses real places only, and rejects any place where people have reported the opposite of what you asked for. Every plan shows a small "what ran" strip (which model read and drafted it, the engine check, which map sources answered, weather, memory), so you can see exactly what powered it.
 3. **Go.** Field Mode shows one step at a time in big type, with big buttons for what you notice (shade: none, patchy or full; bench: yes or no; noise…). It works offline, and ElevenLabs can read the steps aloud so you can keep the phone in your pocket.
 4. **Report.** Your observations become shared, explainable evidence for that place: `unknown → low → moderate`, or `conflicting`. The next person's plan is more honest because you went outside.
 
@@ -61,11 +61,13 @@ The core idea: map apps know a park exists; they don't know whether the bench is
 
 - **Best Use of Gemma**: the open-weight model behind request parsing, mission drafting and note parsing, in production (Gemma 4 on AI Studio) and locally (gemma3:4b on Ollama), always checked by a deterministic engine.
 - **Best Use of Render**: the whole app (API + PWA) runs as a Docker web service from `render.yaml` at shadeloop.onrender.com.
-- **Best Use of Sentry Agent Tracing**: each plan is traced as an agent run: `invoke_agent plan_missions`, `execute_tool` spans for weather, places and memory, `chat <model>` spans with token usage, plus attempts and fallback flags. No prompts or coordinates go into spans. [TODO: attach a trace screenshot; this track asks for one.]
-- **Best Use of ElevenLabs**: gives Field Mode a voice, reading steps aloud so your eyes stay on the trail, with the browser voice as the offline fallback.
-- **Best Use of Tiger Data**: a TimescaleDB hypertable and a 15-minute continuous aggregate power "Reports here by time of day" for each place.
+- **Best Use of Sentry Agent Tracing**: each plan is traced as an agent run: `invoke_agent plan_missions`, `execute_tool` spans for weather, places and memory, `chat <model>` spans with token usage, plus attempts and fallback flags. Voice (`speak_step`, `speak_report`) and similarity search (`similar_places`) are traced as tools too. No prompts or coordinates go into spans. [TODO: attach a trace screenshot; this track asks for one.]
+- **Best Use of ElevenLabs**: gives Field Mode a voice: it reads each step aloud so your eyes stay on the trail, and reads your completion report back when you finish ("Listen to report"). The browser voice is the offline fallback, and the app says which voice spoke.
+- **Best Use of Tiger Data**: a TimescaleDB hypertable and a 15-minute continuous aggregate power "Reports here by time of day" for each place. **pgvector** stores a field-report fingerprint per place (the share of reports for each attribute value: shade, noise, crowding, bench…), and cosine search (`<=>`) powers "Places with similar field reports": if you liked this quiet, shady spot, here's where people reported the same. No embedding model is needed, so it's free, deterministic and explainable. [TODO: verify live after redeploy, or soften this line.]
 - **Best Use of Backboard**: opt-in memory of your own earlier requests ("I need step-free paths") that future plans respect; deleted with "Delete my data".
 - **Best Use of MongoDB Atlas**: the data layer behind an app built on an open-weight model: missions, observations, reports and the shared evidence model.
+- **Best Use of GitHub Copilot**: CI on GitHub Actions runs lint, typecheck, 124 server and 38 web tests, the PWA build, an audit and a Docker build on every push. Copilot issue #1 (a flaky concurrency test) was fixed in commit `89b8ead`.
+- **Best Use of Entire**: the agent session behind that fix is public: https://entire.io/gh/CodewithJha/shadeloop/commit/89b8eada487181a88134341db161312060d1bce4
 - **Best Use of SerpApi**: [only keep this if you verify it live] extra Google Maps place results next to OpenStreetMap during discovery.
 
 <!-- Solo submission. -->

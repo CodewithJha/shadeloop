@@ -685,3 +685,20 @@ describe('preferences, analytics, export', () => {
     expect(JSON.stringify(r.body)).not.toContain('ownerId');
   });
 });
+
+describe('plan process log', () => {
+  it('lists only the steps that really ran, in order, with timings', async () => {
+    routes = liveData;
+    const h = await session();
+    const r = await request(app).post(`${api}/missions/plan`).set(h).send({ prompt: 'a quiet break', availableMinutes: 20, coarseLocation: { lat: 12.98, lon: 77.59 } }).expect(201);
+    const log = r.body.planning.log as { step: string; ok: boolean; atMs: number; ms: number; detail: string }[];
+    const names = log.map((e) => e.step);
+    expect(names).toEqual(expect.arrayContaining(['parse_request', 'get_weather', 'discover_places', 'propose_missions', 'template_fallback']));
+    expect(names).not.toContain('recall_memory');
+    expect(names).not.toContain('rule_engine');
+    expect(log.find((e) => e.step === 'propose_missions')).toMatchObject({ ok: false });
+    expect(log.find((e) => e.step === 'discover_places')?.detail).toMatch(/openstreetmap: \d+ places/);
+    for (let i = 1; i < log.length; i++) expect(log[i].atMs).toBeGreaterThanOrEqual(log[i - 1].atMs);
+    expect(r.body.planning.totalMs).toBeGreaterThanOrEqual(0);
+  });
+});

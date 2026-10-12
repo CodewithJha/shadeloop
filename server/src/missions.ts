@@ -197,13 +197,39 @@ export const planMissions = (ownerId: string, input: PlanRequest) =>
     return r;
   });
 
+/** One real step of a plan, in order, for the "process log" judges and users can read. Times are ms from plan start. */
+export interface PlanLogEntry {
+  step: string;
+  ok: boolean;
+  atMs: number;
+  ms: number;
+  detail: string;
+}
+
+/** Runs fn and appends a log entry describing its outcome. The entry is added when fn settles, so concurrent steps keep their real start time. */
+export async function logged<T>(log: PlanLogEntry[], t0: number, step: string, fn: () => Promise<T>, describe: (r: T) => { ok: boolean; detail: string }): Promise<T> {
+  const start = Date.now();
+  try {
+    const r = await fn();
+    log.push({ step, atMs: start - t0, ms: Date.now() - start, ...describe(r) });
+    return r;
+  } catch (e) {
+    log.push({ step, atMs: start - t0, ms: Date.now() - start, ok: false, detail: (e as Error).message.slice(0, 200) });
+    throw e;
+  }
+}
+
 async function plan(ownerId: string, input: PlanRequest) {
+  const t0 = Date.now();
+  const steps: PlanLogEntry[] = [];
   const prefs = await getPrefs(ownerId);
 
   let parse: (AiMeta & { method: 'ai' | 'keywords' }) | null = null;
   let parsed: Partial<ReturnType<typeof keywordConstraints>> = {};
   if (input.prompt) {
-    const ai = await aiParseRequest(input.prompt);
+    const ai = await logged(steps, t0, 'parse_request', () => aiParseRequest(input.prompt!), (r) =>
+      r.data ? { ok: true, detail: `${r.meta.model} read the request (${r.meta.attempts} call${r.meta.attempts === 1 ? '' : 's'})` } : { ok: false, detail: `keyword parser used: ${r.meta.fallbackReason ?? 'AI off'}` },
+    );
     parsed = ai.data ?? keywordConstraints(input.prompt);
     parse = { ...ai.meta, method: ai.data ? 'ai' : 'keywords' };
   }
@@ -212,16 +238,25 @@ async function plan(ownerId: string, input: PlanRequest) {
   const { required, preferred } = mergeConditions(prefs, { required: input.required, preferred: input.preferred }, parsed);
 
   const memoryOn = Boolean(input.prompt && prefs.privacy.rememberRequests && env.BACKBOARD_API_KEY);
-  const remembered = memoryOn ? await tool('recall_memory', () => recall(ownerId, input.prompt!)) : [];
+  const remembered = memoryOn
+    ? await logged(steps, t0, 'recall_memory', () => tool('recall_memory', () => recall(ownerId, input.prompt!)), (r) => ({ ok: true, detail: `Backboard recalled ${r.length} earlier request${r.length === 1 ? '' : 's'}` }))
+    : [];
 
   const origin = input.coarseLocation;
   // Weather needs only the origin, so it runs alongside discovery. It never rejects (failures become `available: false`).
-  const weatherP = origin ? tool('get_weather', () => getWeather(origin)) : Promise.resolve(null);
+  const weatherP = origin
+    ? logged(steps, t0, 'get_weather', () => tool('get_weather', () => getWeather(origin)), (w) =>
+        w.available ? { ok: true, detail: `Open-Meteo: ${w.temperatureC}°C, feels ${w.apparentTemperatureC}°C` } : { ok: false, detail: `Open-Meteo unavailable: ${w.reason}` },
+      )
+    : Promise.resolve(null);
   let locations: LocationView[] = [];
   let discovery: DiscoveryResult | null = null;
   if (input.locationIds?.length) locations = await loadLocations(input.locationIds, origin);
   else if (origin) {
-    discovery = await tool('discover_places', () => discover(origin));
+    discovery = await logged(steps, t0, 'discover_places', () => tool('discover_places', () => discover(origin)), (d) => ({
+      ok: d.sources.some((x) => x.ok),
+      detail: d.sources.map((x) => (x.ok ? `${x.name}: ${x.count} places` : `${x.name} failed (${x.error ?? 'error'})`)).join(' · '),
+    }));
     locations = discovery.locations;
   }
   locations = locations
@@ -234,7 +269,7 @@ async function plan(ownerId: string, input: PlanRequest) {
   const typeOrder = input.missionType ? [missionType] : [missionType, ...relatedTypes(missionType)];
   const maxMinutes = Math.min(availableMinutes, RULES.maxMissionMinutes);
 
-  const ai = await aiProposeMissions({
+  const ai = await logged(steps, t0, 'propose_missions', () => aiProposeMissions({
     request: input.prompt,
     missionType: input.missionType ? missionType : `${missionType} (or related: ${relatedTypes(missionType).join(', ')})`,
     availableMinutes: maxMinutes,
@@ -259,7 +294,10 @@ async function plan(ownerId: string, input: PlanRequest) {
     ],
     weather: weather?.available ? `${weather.temperatureC}°C, feels ${weather.apparentTemperatureC}°C, precipitation ${weather.precipitationMm} mm` : 'unknown',
     rememberedRequests: remembered,
-  });
+  }), (r) =>
+    r.data ? { ok: true, detail: `${r.meta.model} drafted ${r.data.missions.length} candidate${r.data.missions.length === 1 ? '' : 's'} (${r.meta.attempts} call${r.meta.attempts === 1 ? '' : 's'})` } : { ok: false, detail: r.meta.model ? `${r.meta.model} gave no usable drafts: ${r.meta.fallbackReason}` : `AI not used: ${r.meta.fallbackReason}` },
+  );
+  const engineStart = Date.now();
   const rejected: string[] = [];
   let accepted: (ValidatedCandidate & { aiText?: string })[] = [];
   for (const c of ai.data?.missions ?? []) {
@@ -276,6 +314,11 @@ async function plan(ownerId: string, input: PlanRequest) {
     }
   }
   if (rejected.length) log.info({ rejected: rejected.length }, 'AI candidates rejected by constraint engine');
+  if (ai.data) {
+    for (const v of accepted) steps.push({ step: 'rule_engine', ok: true, atMs: engineStart - t0, ms: 0, detail: `accepted "${v.candidate.title}"` });
+    for (const r of rejected) steps.push({ step: 'rule_engine', ok: false, atMs: engineStart - t0, ms: 0, detail: `refused ${r}`.slice(0, 300) });
+    if (steps.at(-1)?.step === 'rule_engine') steps.at(-1)!.ms = Date.now() - engineStart;
+  }
 
   const usedAi = accepted.length > 0;
   const fallbackReason = usedAi ? null : (ai.meta.fallbackReason ?? `all AI candidates failed constraints: ${rejected.join(' | ')}`.slice(0, 500));
@@ -296,6 +339,7 @@ async function plan(ownerId: string, input: PlanRequest) {
       }
     }
   }
+  if (!usedAi) steps.push({ step: 'template_fallback', ok: accepted.length > 0, atMs: engineStart - t0, ms: Date.now() - engineStart, detail: `${accepted.length} template mission${accepted.length === 1 ? '' : 's'} passed the rule engine` });
   accepted = accepted.slice(0, RULES.maxCandidates);
   if (!accepted.length) {
     throw new AppError(422, 'NO_FEASIBLE_MISSION', 'No mission fits these constraints. Try more time or relax walking limits.', { rejected });
@@ -370,7 +414,8 @@ async function plan(ownerId: string, input: PlanRequest) {
     appliedOpIds: [],
   }));
   await missions().insertMany(docs);
-  const saved = memoryOn && (await tool('save_memory', () => remember(ownerId, input.prompt!)));
+  const saved =
+    memoryOn && (await logged(steps, t0, 'save_memory', () => tool('save_memory', () => remember(ownerId, input.prompt!)), (ok) => ({ ok, detail: ok ? 'Backboard saved this request' : 'Backboard save failed' })));
 
   return {
     planId,
@@ -382,6 +427,8 @@ async function plan(ownerId: string, input: PlanRequest) {
       weather,
       discovery: discovery && { mode: discovery.mode, sources: discovery.sources, limitations: discovery.limitations },
       memory: memoryOn ? { provider: 'backboard', recalled: remembered.length, saved } : null,
+      log: steps.sort((a, b) => a.atMs - b.atMs || 0),
+      totalMs: Date.now() - t0,
     },
   };
 }

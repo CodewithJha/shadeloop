@@ -65,6 +65,14 @@ async function call<T>(method: string, path: string, body?: unknown, auth = true
   return data as T;
 }
 
+export interface PlanLogEntry {
+  step: string;
+  ok: boolean;
+  atMs: number;
+  ms: number;
+  detail: string;
+}
+
 export interface PlanResponse {
   missions: Mission[];
   planning: {
@@ -74,6 +82,8 @@ export interface PlanResponse {
     weather: WeatherView | null;
     discovery: { mode: string; sources: { name: string; ok: boolean; count: number; error?: string }[]; limitations: string[] } | null;
     memory?: { provider: string; recalled: number; saved: boolean } | null;
+    log?: PlanLogEntry[];
+    totalMs?: number;
   };
 }
 

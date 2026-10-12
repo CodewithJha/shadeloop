@@ -408,3 +408,21 @@ td .tag { white-space: normal; }
 .model-note code { font-family: var(--mono); }
 .model-note-rejects { margin: 0.3rem 0 0; padding-left: 1.1rem; font-size: 0.88rem; }
 @media (prefers-reduced-motion: reduce) { .model-note { transform: none; } }
+
+/* Process log: the plan's real pipeline as a field log. */
+.process-log { margin: 0 0 var(--s5); background: var(--ink); color: var(--paper); border: var(--bw) solid var(--ink); border-radius: var(--r); box-shadow: 4px 4px 0 var(--forest); padding: 0 var(--s4) var(--s3); }
+.process-log summary { font-family: var(--mono); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--lime); }
+.process-log summary .meta { color: var(--paper-2); text-transform: none; letter-spacing: 0; margin-left: 0.4rem; }
+.process-log ol { list-style: none; margin: 0; padding: 0; }
+.process-log li { display: grid; grid-template-columns: 4rem 1.2rem 8.5rem 1fr; gap: 0.2rem var(--s2); align-items: baseline; padding: 0.4rem 0; border-top: 1px dashed rgb(245 240 229 / 0.25); font-size: 0.86rem; }
+.pl-time { font-family: var(--mono); font-size: 0.75rem; color: var(--paper-2); }
+.pl-mark { font-family: var(--mono); font-weight: 600; }
+.process-log li.ok .pl-mark { color: var(--lime); }
+.process-log li.no .pl-mark { color: var(--coral); }
+.pl-step { font-family: var(--mono); font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+.pl-detail { color: var(--paper); overflow-wrap: anywhere; }
+.process-log .meta { color: var(--paper-2); }
+@media (max-width: 40rem) {
+  .process-log li { grid-template-columns: 3.4rem 1rem 1fr; }
+  .pl-detail { grid-column: 3; }
+}

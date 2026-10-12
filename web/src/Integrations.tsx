@@ -29,16 +29,28 @@ const GROUPS: [string, (n: string) => boolean][] = [
 /** Plain-language status. VERIFIED needs a real successful call; a key alone is only “configured”. */
 const STATUS: Record<string, { text: string; tone: string }> = {
   VERIFIED: { text: 'Live · verified', tone: 'live' },
-  CONFIGURED: { text: 'Configured · not called yet', tone: 'ready' },
+  CONFIGURED: { text: 'Key set · waiting for first use', tone: 'ready' },
   IMPLEMENTED: { text: 'Ready · no key needed', tone: 'ready' },
   DEGRADED: { text: 'Failing · fallback in use', tone: 'fail' },
   NOT_CONFIGURED: { text: 'Off · fallback in use', tone: 'off' },
   DISABLED: { text: 'Off', tone: 'off' },
 };
 
-function Card({ d }: { d: Dependency }) {
+/**
+ * Honest refinements of the server status: a failing source whose job another live source covered is amber, not red;
+ * Sentry can't confirm delivery from the server, so it says that instead of "waiting".
+ */
+export function statusFor(d: Dependency, all: Dependency[]): { text: string; tone: string } {
+  const live = (n: string) => all.find((x) => x.name === n)?.status === 'VERIFIED';
+  if (d.status === 'DEGRADED' && d.name === 'openstreetmap' && live('serpapi')) return { text: 'Failing · covered by SerpApi', tone: 'covered' };
+  if (d.status === 'DEGRADED' && d.name === 'open-meteo' && /rate limited|429/i.test(d.lastCall?.detail ?? '')) return { text: 'Rate-limited · missions say “check weather yourself”', tone: 'covered' };
+  if (d.status === 'CONFIGURED' && d.name === 'sentry') return { text: 'On · traces sent, delivery not confirmable here', tone: 'ready' };
+  return STATUS[d.status] ?? { text: label(d.status.toLowerCase()), tone: 'off' };
+}
+
+function Card({ d, all }: { d: Dependency; all: Dependency[] }) {
   const a = ABOUT[d.name];
-  const s = STATUS[d.status] ?? { text: label(d.status.toLowerCase()), tone: 'off' };
+  const s = statusFor(d, all);
   return (
     <li className={`integ ${s.tone}`}>
       <div className="integ-head">
@@ -109,7 +121,7 @@ function BuiltWith() {
 
 export function Integrations({ deps }: { deps: { dependencies: Dependency[]; notImplemented: string[] } }) {
   const list = deps.dependencies;
-  const count = (tone: string) => list.filter((d) => (STATUS[d.status]?.tone ?? 'off') === tone).length;
+  const count = (tone: string) => list.filter((d) => statusFor(d, list).tone === tone).length;
   const grouped = GROUPS.map(([name, test]) => [name, list.filter((d) => test(d.name))] as const).filter(([, ds]) => ds.length);
   const rest = list.filter((d) => !GROUPS.some(([, test]) => test(d.name)));
   return (
@@ -117,6 +129,7 @@ export function Integrations({ deps }: { deps: { dependencies: Dependency[]; not
       <p className="integ-tally num" aria-label="Integration status summary">
         <span className="live">{count('live')} live</span>
         <span className="ready">{count('ready')} ready</span>
+        <span className="covered">{count('covered')} covered</span>
         <span className="fail">{count('fail')} failing</span>
         <span className="off">{count('off')} off</span>
       </p>
@@ -125,7 +138,7 @@ export function Integrations({ deps }: { deps: { dependencies: Dependency[]; not
           <h3 className="integ-group-title">{name}</h3>
           <ul className="integ-list">
             {ds.map((d) => (
-              <Card key={d.name} d={d} />
+              <Card key={d.name} d={d} all={list} />
             ))}
           </ul>
         </section>

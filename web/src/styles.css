@@ -426,3 +426,8 @@ td .tag { white-space: normal; }
   .process-log li { grid-template-columns: 3.4rem 1rem 1fr; }
   .pl-detail { grid-column: 3; }
 }
+.integ.covered { border-color: var(--amber); box-shadow: 4px 4px 0 var(--amber); }
+.integ-status.covered { color: #5e3b00; }
+.integ-status.covered .integ-dot { background: #f2c14e; }
+.integ-tally .covered { background: #fbf1dc; border-color: var(--amber); color: #5e3b00; }
+.integ-status { white-space: normal; text-align: right; }

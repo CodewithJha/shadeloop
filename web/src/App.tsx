@@ -297,6 +297,7 @@ function Discover() {
   const w = result?.planning.weather;
   return (
     <>
+      <div className="discover-top">
       <section className="hero" aria-labelledby="discover-title">
         <Contours className="hero-contours" />
         <div className="hero-copy">
@@ -361,6 +362,7 @@ function Discover() {
           </div>
         )}
       </form>
+      </div>
       {busy && <StateNote kind="loading">Checking routes, weather and field reports…</StateNote>}
       {error && (
         <p className="notice error" role="alert">
@@ -517,9 +519,8 @@ function MissionDetail({ id }: { id: string }) {
           <strong>Objective</strong> {m.objective}
         </p>
       </header>
-      <div className="sheet">
-        <MissionSummary m={m} />
-      </div>
+      <div className="detail-grid">
+      <div className="detail-main">
       <FieldLabel n={1}>Steps</FieldLabel>
       <ol className="steps">
         {m.steps.map((s, i) => (
@@ -553,12 +554,19 @@ function MissionDetail({ id }: { id: string }) {
         </>
       )}
       {online && m.selectedLocation && <PlaceHours locationId={m.selectedLocation.id} />}
+      </div>
+      <aside className="detail-side" aria-label="Mission summary">
+      <div className="sheet">
+        <MissionSummary m={m} />
+      </div>
       <FieldLabel n={m.expectations.length > 0 ? 3 : 2}>Safety</FieldLabel>
       <ul className="safety">
         {m.safetyNotes.map((s) => (
           <li key={s}>{s}</li>
         ))}
       </ul>
+      </aside>
+      </div>
       {c.gone && <GoneNotice id={id} />}
       <div className="row actions">
         {!c.gone && local.status === 'planned' && (
@@ -721,7 +729,11 @@ export function App({ onUpdate }: { onUpdate?: () => void }) {
   const route = useRoute();
   const dirty = useDirty();
   const mainRef = useRef<HTMLElement>(null);
-  useEffect(() => mainRef.current?.focus(), [route]);
+  useEffect(() => {
+    // Focus moves to the new screen for screen readers; the page starts at the top instead of hiding under the sticky header.
+    mainRef.current?.focus({ preventScroll: true });
+    scrollTo(0, 0);
+  }, [route]);
   const [, page, id] = route.split('/');
   const nav = [
     ['/', 'Discover'],

@@ -304,3 +304,60 @@ td .tag { white-space: normal; }
 }
 
 @media (max-width: 34rem) { .hero-sprig { display: none; } }
+
+/* ==========================================================================
+   Wide layouts: use laptop and desktop width instead of a single skinny column.
+   ========================================================================== */
+:root { --wrap: 80rem; }
+.top-inner, main, .foot { padding-left: clamp(1rem, 4vw, 3rem); padding-right: clamp(1rem, 4vw, 3rem); }
+.hero { margin-left: calc(-1 * clamp(1rem, 4vw, 3rem)); margin-right: calc(-1 * clamp(1rem, 4vw, 3rem)); }
+@media (max-width: 34rem) { .top-inner { padding: 0 0.6rem; } }
+
+@media (min-width: 48rem) {
+  .hero { margin-left: 0; margin-right: 0; }
+  .hero-copy { max-width: 44rem; }
+}
+
+/* Discover: hero and expedition brief side by side. */
+@media (min-width: 64rem) {
+  .discover-top { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: var(--s6); align-items: stretch; margin-top: var(--s5); }
+  .discover-top .hero { margin: 0; display: flex; flex-direction: column; justify-content: center; padding: var(--s7) var(--s6) 7rem; }
+  .discover-top .plan { margin: 0; align-self: center; }
+  .discover-top .display { font-size: clamp(3.2rem, 5.2vw, 5.4rem); }
+  .hero-trail { width: min(60%, 360px); }
+  .entries { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s6) var(--s5); align-items: start; }
+  .entry:nth-child(even) { margin-top: var(--s6); }
+  .logbook { columns: 2; column-gap: var(--s6); }
+  .logbook li { break-inside: avoid; }
+}
+
+/* Mission detail: steps as the main column, summary and safety beside it. */
+.detail-side .field-label:first-of-type { margin-top: var(--s6); }
+@media (min-width: 64rem) {
+  .detail-grid { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: var(--s6); align-items: start; }
+  .detail-side { position: sticky; top: 4.5rem; }
+  .detail-side .sheet { margin-top: var(--s6); }
+  .page-head p, .objective { max-width: 60rem; }
+}
+
+/* Field Mode stays focused, but at a confident width. */
+@media (min-width: 64rem) {
+  main.is-field { max-width: 64rem; }
+  .step-card { padding: var(--s6) var(--s7); }
+  .field-step { font-size: clamp(2rem, 3vw, 2.8rem); }
+  .obs-group .row button { flex: 0 1 11rem; }
+}
+
+/* History: numbers as a strip, ledger beneath. */
+@media (min-width: 48rem) {
+  dl.facts { grid-template-columns: repeat(4, minmax(0, 1fr)); grid-template-rows: auto auto; grid-auto-flow: column; }
+  dl.facts dt { border-left: 1.5px dashed var(--rule); }
+  dl.facts dd { border-bottom: 0; border-left: 1.5px dashed var(--rule); }
+  dl.facts dt:first-of-type, dl.facts dd:first-of-type { border-left: 0; }
+}
+
+/* Settings: preference fieldsets in two columns. */
+@media (min-width: 56rem) {
+  .settings-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 var(--s5); align-items: start; }
+  .settings-form > button, .settings-form > p { grid-column: 1 / -1; justify-self: start; }
+}

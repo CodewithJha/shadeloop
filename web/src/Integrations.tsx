@@ -44,6 +44,7 @@ export function statusFor(d: Dependency, all: Dependency[]): { text: string; ton
   const live = (n: string) => all.find((x) => x.name === n)?.status === 'VERIFIED';
   if (d.status === 'DEGRADED' && d.name === 'openstreetmap' && live('serpapi')) return { text: 'Failing · covered by SerpApi', tone: 'covered' };
   if (d.status === 'DEGRADED' && d.name === 'open-meteo' && /rate limited|429/i.test(d.lastCall?.detail ?? '')) return { text: 'Rate-limited · missions say “check weather yourself”', tone: 'covered' };
+  if (d.status === 'CONFIGURED' && d.name === 'fixture') return { text: 'On · sample places, not real', tone: 'ready' };
   if (d.status === 'CONFIGURED' && d.name === 'sentry') return { text: 'On · traces sent, delivery not confirmable here', tone: 'ready' };
   return STATUS[d.status] ?? { text: label(d.status.toLowerCase()), tone: 'off' };
 }

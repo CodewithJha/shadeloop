@@ -390,3 +390,8 @@ td .tag { white-space: normal; }
 .integ-facts dt { font-family: var(--mono); font-size: 0.68rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-2); padding-top: 0.15rem; }
 .integ-facts dd { margin: 0; color: var(--ink-2); }
 @media (max-width: 26rem) { .integ-facts { grid-template-columns: 1fr; } .integ-facts dd { margin-bottom: 0.3rem; } }
+
+/* "What ran" strip: printed labels for each tool that actually contributed to a plan. */
+.field-kit { list-style: none; display: flex; flex-wrap: wrap; gap: var(--s2); padding: 0; margin: 0 0 var(--s4); }
+.field-kit li { font-family: var(--mono); font-size: 0.74rem; border: 1.5px solid var(--ink); background: var(--white); padding: 0.15rem 0.5rem; }
+.field-kit li span { font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--forest); margin-right: 0.25rem; }

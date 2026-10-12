@@ -2,6 +2,9 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { registerSW } from 'virtual:pwa-register';
 import { App } from './App.tsx';
+import '@fontsource-variable/bricolage-grotesque';
+import '@fontsource/ibm-plex-mono/400.css';
+import '@fontsource/ibm-plex-mono/600.css';
 import './styles.css';
 
 const root = createRoot(document.getElementById('root')!);

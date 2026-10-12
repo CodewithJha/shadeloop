@@ -85,6 +85,13 @@ export interface Dependency {
   lastCall?: { ok: boolean; at: string; detail: string } | null;
 }
 
+export interface SimilarPlace {
+  locationId: string;
+  name: string | null;
+  reports: number;
+  similarity: number;
+}
+
 export interface HourlyReport {
   hour: number;
   attribute: string;
@@ -115,6 +122,7 @@ export const api = {
   deps: () => call<{ status: string; dependencies: Dependency[]; notImplemented: string[] }>('GET', '/health/dependencies', undefined, false),
   parseNote: (missionId: string, text: string) =>
     call<{ proposals: { attribute: string; value: string }[]; method: string; model: string | null; fallbackReason: string | null }>('POST', `/missions/${missionId}/observations/parse`, { text }),
+  similar: (locationId: string) => call<{ available: boolean; reason?: string; method?: string; places: SimilarPlace[] }>('GET', `/locations/${encodeURIComponent(locationId)}/similar`),
   hourly: (locationId: string) =>
     call<{ available: boolean; hours: HourlyReport[] }>('GET', `/locations/${encodeURIComponent(locationId)}/hourly?tz=${encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone)}`),
   /** ElevenLabs audio for one step; throws when unavailable so the caller can use the browser voice. */

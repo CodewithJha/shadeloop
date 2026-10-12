@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type FormEvent } from 'react';
 import { CONDITIONS, MISSION_TYPES, type Condition, type Coords, type Mission, type SourceType } from '@shadeloop/shared';
-import { api, type HistoryItem, type HourlyReport, type PlanResponse } from './api.ts';
+import { api, type HistoryItem, type HourlyReport, type PlanResponse, type SimilarPlace } from './api.ts';
 import { cacheMission, dismissOp, enqueue, flush, getCached, getMeta, listCached, listOps, refreshMission, resetStuck, retryFailed, retryOp, subscribe, updateLocal, type CachedMission, type QueuedOp } from './store.ts';
 import { Completion, FieldMode } from './Field.tsx';
 import { Settings } from './Settings.tsx';
@@ -486,6 +486,36 @@ function PlaceHours({ locationId }: { locationId: string }) {
   );
 }
 
+/** Places whose shared field reports look most like this one (Tiger Data pgvector). Hidden when there are none. */
+function SimilarPlaces({ locationId }: { locationId: string }) {
+  const [places, setPlaces] = useState<SimilarPlace[]>([]);
+  useEffect(() => {
+    api
+      .similar(locationId)
+      .then((r) => setPlaces(r.available ? r.places : []))
+      .catch(() => setPlaces([]));
+  }, [locationId]);
+  if (!places.length) return null;
+  return (
+    <section className="similar" aria-labelledby="similar-title">
+      <h3 id="similar-title" className="kicker">
+        Places with similar field reports
+      </h3>
+      <ul className="logbook">
+        {places.map((p) => (
+          <li key={p.locationId}>
+            <span>{p.name ?? 'A reported place'}</span>
+            <span className="meta num">
+              {Math.round(p.similarity * 100)}% alike · {p.reports} reports
+            </span>
+          </li>
+        ))}
+      </ul>
+      <p className="hint">Matched by Tiger Data (pgvector) on what people reported in the last 90 days. Reports are unverified.</p>
+    </section>
+  );
+}
+
 /* ---------------- Mission detail ---------------- */
 
 function MissionDetail({ id }: { id: string }) {
@@ -576,6 +606,7 @@ function MissionDetail({ id }: { id: string }) {
         </>
       )}
       {online && m.selectedLocation && <PlaceHours locationId={m.selectedLocation.id} />}
+      {online && m.selectedLocation && <SimilarPlaces locationId={m.selectedLocation.id} />}
       </div>
       <aside className="detail-side" aria-label="Mission summary">
       <div className="sheet">

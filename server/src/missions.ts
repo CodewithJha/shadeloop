@@ -667,7 +667,7 @@ export async function addObservation(
     throw notActive(now.status);
   }
   if (duplicate) return { observation: doc, duplicate: true, evidence: null };
-  await tigerRecord(doc);
+  await tigerRecord(doc, now.selectedLocation?.name);
   const evidence = locationId ? await recomputeEvidence(locationId, input.attribute) : null;
   return { observation: doc, duplicate: false, evidence };
 }

@@ -25,10 +25,10 @@ import { log } from './log.ts';
 import { AppError } from './errors.ts';
 import { pingDb } from './db.ts';
 import { aiHealth, aiParseNote } from './ai.ts';
-import { lastCall, statusFrom } from './integrations.ts';
+import { lastCall, statusFrom, tool } from './integrations.ts';
 import { keywordObservations } from './fallback.ts';
 import { discover, speak } from './providers.ts';
-import { tigerHourly } from './tiger.ts';
+import { tigerHourly, tigerSimilar } from './tiger.ts';
 import { analyticsAttributes, analyticsOverview, createOwner, deleteData, exportData, getPrefs, ownerFromToken, putPrefs } from './account.ts';
 import { addObservation, clockOffset, getMission, getReport, history, listMissions, listObservations, missionView, planMissions, sync, transition } from './missions.ts';
 import { openapi } from './openapi.ts';
@@ -243,6 +243,16 @@ export function createApp() {
     if (!env.TIGER_DATABASE_URL) return void res.json({ available: false, reason: 'Tiger Data is not configured', hours: [] });
     const hours = await tigerHourly(id, tz);
     res.json(hours ? { available: true, timeZone: tz, windowDays: 90, hours } : { available: false, reason: 'Tiger Data is unavailable right now', hours: [] });
+  });
+
+  // Places whose shared field reports look most like this one (Tiger Data pgvector). Counts and names only, no owners.
+  api.get('/locations/:id/similar', async (req, res) => {
+    const id = parse(Id, req.params.id);
+    if (!env.TIGER_DATABASE_URL) return void res.json({ available: false, reason: 'Tiger Data is not configured', places: [] });
+    const r = await tool('similar_places', () => tigerSimilar(id));
+    if (!r) return void res.json({ available: false, reason: 'Tiger Data is unavailable right now', places: [] });
+    if (!r.vector) return void res.json({ available: false, reason: 'pgvector is not enabled on this Tiger database', places: [] });
+    res.json({ available: true, method: 'pgvector cosine over field-report fingerprints', windowDays: 90, places: r.places });
   });
 
   // Speaks a step of the caller's own mission, never arbitrary text, so the voice budget can't be spent on anything else.

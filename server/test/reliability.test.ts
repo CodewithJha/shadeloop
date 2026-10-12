@@ -327,6 +327,11 @@ describe('Tiger Data hourly patterns', () => {
     const get = (q: string) => request(app).get(`${api}/locations/osm%3Away%2F1/hourly${q}`).set('authorization', `Bearer ${token}`);
     expect((await get('?tz=Asia/Kolkata')).body).toEqual({ available: false, reason: 'Tiger Data is not configured', hours: [] });
     expect((await get('?tz=Mars/Base')).status).toBe(400);
+    expect((await request(app).get(`${api}/locations/osm%3Away%2F1/similar`).set('authorization', `Bearer ${token}`)).body).toEqual({
+      available: false,
+      reason: 'Tiger Data is not configured',
+      places: [],
+    });
     expect((await request(app).delete(`${api}/me`).set('authorization', `Bearer ${token}`)).body.tigerRowsDeleted).toBeNull();
   });
 });

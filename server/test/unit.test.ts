@@ -349,3 +349,23 @@ describe('log redaction', () => {
     }
   });
 });
+
+describe('Tiger Data field-report fingerprint (pgvector)', async () => {
+  const { fingerprint, FINGERPRINT_DIMS } = await import('../src/tiger.ts');
+  it('has one dimension per attribute value and stores per-attribute shares', () => {
+    const v = fingerprint([
+      { attribute: 'shade_quality', value: 'good', reports: 3 },
+      { attribute: 'shade_quality', value: 'none', reports: 1 },
+      { attribute: 'noise_level', value: 'quiet', reports: 2 },
+    ]);
+    expect(v).toHaveLength(FINGERPRINT_DIMS.length);
+    expect(v[FINGERPRINT_DIMS.indexOf('shade_quality=good')]).toBe(0.75);
+    expect(v[FINGERPRINT_DIMS.indexOf('shade_quality=none')]).toBe(0.25);
+    expect(v[FINGERPRINT_DIMS.indexOf('noise_level=quiet')]).toBe(1);
+    expect(v[FINGERPRINT_DIMS.indexOf('crowding=busy')]).toBe(0);
+  });
+  it('is all zeros with no reports, and ignores unknown attributes', () => {
+    expect(fingerprint([]).every((x) => x === 0)).toBe(true);
+    expect(fingerprint([{ attribute: 'made_up', value: 'x', reports: 5 }]).every((x) => x === 0)).toBe(true);
+  });
+});

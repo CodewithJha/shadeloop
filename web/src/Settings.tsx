@@ -4,8 +4,7 @@ import { api, type Dependency } from './api.ts';
 import { clearAll, delMeta, getMeta, setMeta } from './store.ts';
 import { label, useSync } from './App.tsx';
 import { FieldLabel, StateNote } from './Marks.tsx';
-
-const STATUS_TONE: Record<string, string> = { VERIFIED: 'good', DEGRADED: 'bad', NOT_CONFIGURED: 'warn' };
+import { Integrations } from './Integrations.tsx';
 
 export function Settings() {
   const { online } = useSync();
@@ -226,43 +225,9 @@ export function Settings() {
       )}
 
       <FieldLabel n={3}>Integrations</FieldLabel>
-      <p className="hint">Status comes from the server. “Verified” means a live call succeeded, not just that a key is present.</p>
+      <p className="hint">What powers ShadeLoop, and what happens when a piece is missing. Status comes from the server: “verified” means a real call succeeded, not just that a key is set.</p>
       {deps ? (
-        <div className="scroll-x" role="region" aria-label="Integration status" tabIndex={0}>
-          <table>
-            <thead>
-              <tr>
-                <th scope="col">Service</th>
-                <th scope="col">Status</th>
-                <th scope="col">Detail</th>
-              </tr>
-            </thead>
-            <tbody>
-              {deps.dependencies.map((d) => (
-                <tr key={d.name}>
-                  <td>
-                    {d.name}
-                    <br />
-                    <span className="meta">{d.role}</span>
-                  </td>
-                  <td>
-                    <span className={`tag ${STATUS_TONE[d.status] ?? ''}`}>{d.status}</span>
-                  </td>
-                  <td>
-                    {d.detail}
-                    {d.lastCall && (
-                      <span className="meta">
-                        <br />
-                        Last call {d.lastCall.ok ? 'ok' : 'failed'} at {new Date(d.lastCall.at).toLocaleTimeString()}: {d.lastCall.detail}
-                      </span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <p className="meta">Not implemented: {deps.notImplemented.join(', ')}.</p>
-        </div>
+        <Integrations deps={deps} />
       ) : (
         <StateNote kind={online ? 'loading' : 'offline'}>{online ? 'Checking integrations…' : 'Unavailable offline.'}</StateNote>
       )}
